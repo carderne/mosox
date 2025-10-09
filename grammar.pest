@@ -1,0 +1,195 @@
+// Pest grammar for GMPL linear programming language
+
+// The whole file must either succeed or fail
+root = {
+    SOI
+  ~ model_entry*
+  // Expect the data keyword before the data section starts
+  // (Inserted automatically in Rust if not present)
+  ~ ("data;"+ ~ data_entry*)?
+  ~ EOI
+}
+
+// //////////////////////
+// MODEL
+// GMPL can be split into .mod model files and .dat data files
+// The bulk of this grammar deals with the former
+// The root level entries are capitalised to make scanning a bit easier,
+// it doesn't have any other significance.
+// //////////////////////
+model_entry = _{
+  // Main model entries
+  | VAR
+  | PARAM
+  | SET
+  | OBJECTIVE
+  | CONSTRAINT
+  // Below here are ignored
+  | FOR
+  | TABLE
+  | PRINT
+  | CHECK
+  | SOLVE
+  | END
+}
+
+// Variable
+// Example: var Demand >= 0;
+VAR        = { "var" ~ name ~ domain? ~ var_bounds? ~ ("," ~ param_type)? ~ ";" }
+var_bounds = { rel_op ~ number }
+
+// Parameter
+// The comma separator seems to be optional
+// Example: param Discount{r in REGION} := (1 + DiscountRate[r])
+PARAM           =  { "param" ~ name ~ domain? ~ (","? ~ param_attrib)* ~ param_assign? ~ ";" }
+param_attrib    = _{ param_type | param_condition | param_in | param_default }
+param_type      =  { "integer" | "binary" | "symbolic" }
+param_condition =  { rel_op ~ expr_or_literal }
+param_in        =  { "in" ~ expr_or_literal }
+param_assign    =  { ":=" ~ expr_or_literal }
+param_default   =  { "default" ~ expr_or_literal }
+
+// Set
+// Example: set DAILYTIMEBRACKET;
+SET = { "set" ~ name ~ ";" }
+
+// Constraint
+// Example: s.t. Capacity{r in REGION}: NewCap[r] = 2
+CONSTRAINT      =  { constraint_kw ~ name ~ domain? ~ ":" ~ constraint_expr ~ (","? ~ constraint_expr)* ~ ";" }
+constraint_expr =  { expr ~ rel_op ~ expr }
+constraint_kw   = _{ "subject to" | "subj to" | "s.t." } // can be omitted
+
+// Objective
+// Example: minimize cost: sum{y in YEAR} Cost[y];
+OBJECTIVE = { obj_sense ~ id ~ ":" ~ expr ~ ";" }
+obj_sense = { "maximize" | "minimize" }
+
+
+// For (ignored)
+FOR       = { "for" ~ domain ~ "{" ~ for_inner* ~ "}" }
+for_inner = { FOR | PRINT }
+
+// Print (ignored)
+PRINT = @{ "printf" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
+
+// Check (ignored)
+CHECK = @{ "check" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
+
+// Solve (ignored)
+SOLVE = { "solve" ~ ";" }
+
+// End (ignored)
+END = { "end" ~ ";" }
+
+// Table (ignored)
+TABLE      = { "table" ~ id ~ domain? ~ table_out ~ table_path ~ table_vars ~ ";" }
+table_out  = { "OUT" ~ string_literal }
+table_path = { "ResultsPath" ~ "&" ~ string_literal }
+table_vars = { ":" ~ table_var ~ ("," ~ table_var)* }
+table_var  = { var_subscripted ~ "~" ~ var_subscripted }
+
+// //////////////////////
+// DATA FILES
+// Generally a separate .dat file.
+// Mostly param values.
+// Less of the grammar but will be far majority of text parsed.
+// //////////////////////
+data_entry = _{
+  | DATA_SET
+  | DATA_PARAM
+  | END
+}
+
+// Data: Set
+DATA_SET = { "set" ~ name ~ ":="? ~ value+ ~ ";" }
+value    = { id | number }
+
+// Data: Param
+DATA_PARAM          =  {
+    "param" ~ id ~ ("default" ~ param_data_default)? ~ ":="? ~ param_data_table* ~ ";"
+}
+param_data_default  = @{ number }
+param_data_table    =  { param_data_target? ~ ":" ~ param_data_cols ~ ":="? ~ param_data_row+ }
+param_data_cols     =  { param_data_label+ }
+param_data_label    =  { id | number }
+param_data_row      = ${ param_data_label ~ param_data_row_vals ~ NEWLINE }
+param_data_row_vals = ${ ((" " | "\t") ~ param_data_val)+ }
+param_data_val      = @{ number }
+param_data_target   =  { "[" ~ (index_var | param_data_any) ~ ("," ~ (index_var | param_data_any))* ~ "]" }
+param_data_any      =  { "*" }
+
+// //////////////////////
+// LANGUAGE COMPONENTS
+// //////////////////////
+
+// Domain
+// example:
+// {r in REG, t in TECH:Capacity[r,t,y]<>0}
+domain      =  { "{" ~ (domain_part ~ ","?)+ ~ (":" ~ logic_expr)? ~ "}" }
+domain_part =  { domain_var ~ "in" ~ domain_set }
+domain_var  = @{ id }
+domain_set  = @{ id }
+
+// Logical expression
+// Expressions that evaluate to true or false
+// Example: Demand[r] <> 0
+logic_expr          =  { logic_expr_type ~ (bool ~ logic_expr_type)* }
+logic_expr_type     = _{ logic_expr_part | logic_expr_compound }
+logic_expr_part     = _{ expr_or_literal ~ rel_op ~ expr_or_literal }
+logic_expr_compound =  { "(" ~ logic_expr ~ ")" }
+
+// Index
+var_subscripted =  { var_ref ~ subscript? }
+var_ref         = @{ id }
+subscript       =  { "[" ~ index ~ ("," ~ index)* ~ "]" }
+index           =  { index_var ~ index_shift? }
+index_var       = @{ id }
+index_shift     =  { ("+" | "-") ~ "1" }
+
+// Expression
+// Bundled up with string_literal as often that is also allowed
+// Definitely not close to comprehensive
+// Example: Rate[r] * Ratio[r]
+expr_or_literal = _{ expr | string_literal }
+expr            =  { "-"? ~ term ~ (math_op ~ term)* }
+term            = _{ conditional | number | func | var_subscripted | "(" ~ expr ~ ")" }
+conditional     =  { "if" ~ logic_expr ~ "then" ~ expr_or_literal ~ ("else" ~ expr_or_literal)? }
+
+// Function
+// GMPL supports more, just covering the basics
+func             = _{ func_min | func_max | func_sum }
+func_min         =  { "min" ~ domain ~ "min" ~ "(" ~ func_var ~ ")" }
+func_max         =  { "max" ~ domain ~ "max" ~ "(" ~ func_var ~ ")" }
+func_sum         =  { "sum" ~ domain ~ func_sum_operand }
+func_sum_operand =  { ("(" ~ expr ~ ")") | var_subscripted }
+func_var         = @{ id }
+
+// Basic operators
+math_op =  { add_op | mul_op | pow_op }
+add_op  = _{ "+" | "-" }
+mul_op  = _{ "*" | "/" }
+pow_op  = _{ "^" }
+bool                =  { "and" | "or" | "&&" | "||" }
+rel_op          =  { "<=" | "<>" | "<" | "==" | "=" | ">=" | ">" | "!=" }
+
+// //////////////////////
+// GRAMMAR BASICS
+// //////////////////////
+
+// Primitives
+name   = @{ id }
+id     = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+number = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }
+
+// String literal
+string_literal =  { single_quoted | double_quoted }
+single_quoted  = _{ "'" ~ single_char* ~ "'" }
+single_char    = _{ "''" | (!"'" ~ ANY) }
+double_quoted  = _{ "\"" ~ double_char* ~ "\"" }
+double_char    = _{ "\"\"" | (!"\"" ~ ANY) }
+
+// Comments and whitespace are automatically inserted between all rules
+WHITESPACE       = _{ " " | "\t" | NEWLINE }
+COMMENT          = @{ comment_multi | comment_single }
+comment_single   = @{ "#" ~ (!NEWLINE ~ ANY)* }
+comment_multi    =  { "/*" ~ (!"*/" ~ ANY)* ~ "*/" }

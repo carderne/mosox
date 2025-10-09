@@ -1,0 +1,62 @@
+[config]
+skip_core_tasks = true
+reduce_output = true
+
+[tasks.default]
+command = "cargo"
+args = ["make", "--list-all-steps"]
+
+# CI
+[tasks.fmt]
+install_crate = "rustfmt"
+command = "cargo"
+args = ["fmt"]
+
+[tasks.lint]
+install_crate = "clippy"
+command = "cargo"
+args = ["clippy"]
+
+[tasks.test]
+command = "cargo"
+args = ["test"]
+
+[tasks.ci]
+dependencies = [
+    "fmt",
+    "lint",
+    "test"
+]
+
+# Build
+[tasks.clean]
+command = "cargo"
+args = ["clean"]
+
+[tasks.build]
+command = "cargo"
+args = ["build"]
+dependencies = ["clean"]
+
+# Run
+[tasks.run]
+description = "Run the model with debug logging"
+env = { RUST_LOG = "debug" }
+command = "cargo"
+args = ["run", "check", "examples/osemosys.mod", "examples/atlantis.dat"]
+
+# Coverage
+[tasks.test-cov]
+env = { RUSTFLAGS = "-Cinstrument-coverage", LLVM_PROFILE_FILE = "target/prof/cargo-test-%p-%m.profraw" }
+command = "cargo"
+args = ["test"]
+
+[tasks.gen-cov]
+dependencies = ["test-cov"]
+command = "grcov"
+args = [".", "--source-dir=.", "--binary-path=target/debug", "--output-types=html", "--branch", "--output-path=target/coverage"]
+
+[tasks.cov]
+dependencies = ["gen-cov"]
+command = "open"
+args = ["target/coverage/index.html"]

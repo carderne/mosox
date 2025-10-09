@@ -1,0 +1,29 @@
+name: crates
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: set version
+        env:
+          RELEASE_TAG: ${{ github.ref }}
+        run: |
+          sed -i "s/0\\.0\\.999/${RELEASE_TAG##*\/v}/" Cargo.toml
+          sed -i "s/0\\.0\\.999/${RELEASE_TAG##*\/v}/" Cargo.lock
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo test --all-features
+
+      - name: publish
+        env:
+          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: |
+          cargo publish --token $CRATES_TOKEN --allow-dirty
