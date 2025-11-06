@@ -37,3 +37,10 @@ Run against the full Osemosys model and Atlantic data:
 ```bash
 cargo make run
 ```
+
+## Docs
+
+- [Code Overview](docs/CODE_OVERVIEW.md) - Architecture and implementation details
+- [Grammar](docs/GRAMMAR.md) - GMPL grammar specification and coverage
+- [Example IR](docs/EXAMPLE_IR.md) - Sample intermediate representation output
+- [Future Plan](docs/FUTURE_PLAN.md) - Development roadmap for Phases 2-3
