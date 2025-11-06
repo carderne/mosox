@@ -9,6 +9,7 @@ use crate::data::Entry;
 mod data;
 mod grammar;
 pub mod loader;
+pub mod model;
 pub mod utils;
 
 /// Loads the GMPL model file at `path` into an internal representation

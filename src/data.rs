@@ -269,7 +269,12 @@ impl DataSet {
 
 impl fmt::Display for DataSet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "data: set {} := <{} values>", self.name, self.values.len())
+        write!(
+            f,
+            "data: set {} := <{} values>",
+            self.name,
+            self.values.len()
+        )
     }
 }
 
