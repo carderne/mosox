@@ -109,11 +109,12 @@ DATA_PARAM          =  {
     "param" ~ id ~ ("default" ~ param_data_default)? ~ ":="? ~ param_data_body ~ ";"
 }
 param_data_default  = @{ number }
-param_data_body =      { param_data_matrix+ | param_data_list }
+param_data_body =      { param_data_scalar | param_data_matrix+ | param_data_list }
 // We don't support using "list" format for 2D params
 // As there's no way to unambiguously parse in PEST (needs post-processing)
+param_data_scalar   = @{ number }
 param_data_list     =  { param_data_pair+ }
-param_data_pair     =  { param_data_token ~ param_data_token }
+param_data_pair     =  { param_data_token ~ number }
 param_data_token    =  { id | number | "." }
 param_data_matrix   =  { param_data_target? ~ ":" ~ param_data_cols ~ ":="? ~ param_data_row+ }
 param_data_cols     =  { param_data_label+ }

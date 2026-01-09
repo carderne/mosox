@@ -1,7 +1,7 @@
-mod atoms;
+pub mod atoms;
 mod expr;
 
-pub use expr::{Conditional, Expr, ExprOrLiteral};
+pub use expr::{Expr, ExprOrLiteral};
 
 use std::fmt;
 
@@ -290,14 +290,14 @@ impl fmt::Display for DataSet {
 #[derive(Clone, Debug)]
 pub struct ParamDataPair {
     pub key: String,
-    pub value: String,
+    pub value: f64,
 }
 
 impl ParamDataPair {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
         let mut tokens = entry.into_inner();
         let key = tokens.next().unwrap().as_str().to_string();
-        let value = tokens.next().unwrap().as_str().to_string();
+        let value = tokens.next().unwrap().as_str().parse().unwrap();
         Self { key, value }
     }
 }
@@ -306,12 +306,13 @@ impl ParamDataPair {
 pub enum ParamDataBody {
     Tables(Vec<ParamDataTable>),
     List(Vec<ParamDataPair>),
+    Num(f64),
 }
 
 #[derive(Clone, Debug)]
 pub struct DataParam {
     pub name: String,
-    pub default: Option<String>,
+    pub default: Option<f64>,
     pub body: Option<ParamDataBody>,
 }
 
@@ -324,7 +325,7 @@ impl DataParam {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::id => name = pair.as_str().to_string(),
-                Rule::param_data_default => default = Some(pair.as_str().to_string()),
+                Rule::param_data_default => default = Some(pair.as_str().parse().unwrap()),
                 Rule::param_data_body => {
                     let mut inner_pairs = pair.into_inner();
                     let first = inner_pairs.next().unwrap();
@@ -338,6 +339,10 @@ impl DataParam {
                             let mut tables = vec![ParamDataTable::from_entry(first)];
                             tables.extend(inner_pairs.map(ParamDataTable::from_entry));
                             ParamDataBody::Tables(tables)
+                        }
+                        Rule::param_data_scalar => {
+                            let num: f64 = first.as_str().parse().unwrap();
+                            ParamDataBody::Num(num)
                         }
                         _ => unreachable!(),
                     });
@@ -366,6 +371,9 @@ impl fmt::Display for DataParam {
             }
             Some(ParamDataBody::List(pairs)) => {
                 write!(f, " := <{} pair(s)>", pairs.len())?;
+            }
+            Some(ParamDataBody::Num(num)) => {
+                write!(f, " := {}", num)?;
             }
             None => {}
         }

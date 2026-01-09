@@ -6,10 +6,11 @@
 
 use crate::gmpl::Entry;
 
-mod gmpl;
+pub(crate) mod gmpl;
 mod grammar;
 pub mod loader;
 pub mod model;
+pub mod mps;
 
 /// Loads the GMPL model file at `path` into an internal representation
 pub fn load_model(path: &str) -> Vec<Entry> {
