@@ -12,7 +12,7 @@ use crate::{
 use itertools::Itertools;
 
 type SetMap = IndexMap<String, Vec<SetIndex>>;
-type SetValMap = HashMap<String, SetIndex>;
+type IdxValMap = HashMap<String, SetIndex>;
 type SetArr = Vec<Vec<SetIndex>>;
 type VarMap = HashMap<String, bool>;
 type ParamMap = HashMap<String, ParamCont>;
@@ -60,14 +60,14 @@ pub fn compile_mps(model: ModelWithData) {
     {
         // Objective is always "singular"
         // it has no domain
-        let index: SetValMap = HashMap::new();
+        let idx_val_map: IdxValMap = HashMap::new();
 
         let pairs = recurse(
             model.objective.expr.clone(),
             &var_map,
             &param_map,
             &set_map,
-            &index,
+            &idx_val_map,
         );
         let pairs = match pairs {
             RecurseResult::Pairs(pairs) => pairs,
@@ -89,10 +89,40 @@ pub fn compile_mps(model: ModelWithData) {
 
     // Then all the actual constraints
     for constraint in &model.constraints {
-        let con_indexes = domain_to_indexes(&constraint.domain, &var_map, &param_map, &set_map);
+        let con_indexes = domain_to_indexes(
+            &constraint.domain,
+            &var_map,
+            &param_map,
+            &set_map,
+            &HashMap::new(),
+        );
 
         for con_index in con_indexes {
-            let con_index_vals: SetValMap = constraint
+            // There are three concepts in domain indexing.
+            // SET (generically, dimension)
+            // type: String
+            // Upper-case name for a dimension
+            // Eg: YEAR
+            // (The set directive supplies all the values)
+            //
+            // INDEX (set_index, con_index etc)
+            // type: String
+            // A single index is a single lower-case letter
+            // That a var/param/constraint uses to index a given set/dimension
+            // Eg: y
+            //
+            // VALUE
+            // type: SetIndex
+            // represents a single actual value in this set/dimension
+            // Eg: 2014
+            //
+            // con_index_vals stores the current LOCATION
+            // as a dict like:
+            // { y => 2014, r: "Africa" }
+            //
+            // This should be improved so that it also knows which set/dimension
+            // each entry comes from...
+            let idx_val_map: IdxValMap = constraint
                 .clone()
                 .domain
                 .unwrap_or_else(|| Domain {
@@ -105,8 +135,7 @@ pub fn compile_mps(model: ModelWithData) {
                 .map(|(part, idx)| (part.var.clone(), idx.clone()))
                 .collect();
 
-            let built =
-                build_constraint(constraint, &var_map, &param_map, &set_map, &con_index_vals);
+            let built = build_constraint(constraint, &var_map, &param_map, &set_map, &idx_val_map);
 
             let dir = rel_op_to_row_type(&constraint.constraint_expr.op);
             rows.insert(
@@ -168,6 +197,11 @@ fn resolve_param(param: ParamWithData) -> ParamCont {
             ParamDataBody::Tables(tables) => {
                 let mut arr: HashMap<Vec<SetIndex>, f64> = HashMap::new();
                 for table in tables {
+                    // Expressions like:
+                    // [Atlantis_00A,NGCC,NOx,*,*]:
+                    // Become prefixes for the indexes down below
+                    // NOTE: Current implementation ONLY supports having exactly two * (Any)
+                    // targets, and they must be the last two
                     let target_idxs: Vec<SetIndex> = match table.target {
                         Some(targets) => targets
                             .iter()
@@ -212,36 +246,51 @@ fn build_constraint(
     var_map: &VarMap,
     param_map: &ParamMap,
     set_map: &SetMap,
-    index: &SetValMap,
+    idx_val_map: &IdxValMap,
 ) -> BuiltConstraint {
     let lhs = recurse(
         constraint.constraint_expr.lhs.clone(),
         var_map,
         param_map,
         set_map,
-        index,
+        idx_val_map,
     );
     let rhs = recurse(
         constraint.constraint_expr.rhs.clone(),
         var_map,
         param_map,
         set_map,
-        index,
+        idx_val_map,
     );
 
-    let pairs = match lhs {
-        RecurseResult::Pairs(pairs) => pairs,
-        _ => panic!("unhandled outer LHS: {:?}", lhs),
-    };
+    match (lhs, rhs) {
+        (RecurseResult::Pairs(pairs), RecurseResult::Number(num)) => BuiltConstraint {
+            pairs,
+            rhs: Some(num),
+        },
+        (RecurseResult::Number(num), RecurseResult::Pairs(pairs)) => BuiltConstraint {
+            pairs,
+            rhs: Some(num),
+        },
+        (RecurseResult::Number(_), RecurseResult::Number(_)) => {
+            panic!("constraint has f64 on both sides: {}", &constraint.name)
+        }
+        (RecurseResult::Pairs(lhs), RecurseResult::Pairs(rhs)) => {
+            let rhs_neg: Vec<Pair> = rhs
+                .iter()
+                .map(|pair| Pair {
+                    var: pair.var.clone(),
+                    index: pair.index.clone(),
+                    coeff: -pair.coeff,
+                })
+                .collect();
 
-    let rhs = match rhs {
-        RecurseResult::Number(num) => num,
-        _ => panic!("unhandled outer RHS: {:?}", rhs),
-    };
-
-    BuiltConstraint {
-        rhs: Some(rhs),
-        pairs,
+            let pairs = [lhs, rhs_neg].concat();
+            BuiltConstraint {
+                rhs: Some(0.0),
+                pairs,
+            }
+        }
     }
 }
 
@@ -250,15 +299,12 @@ fn recurse(
     var_map: &VarMap,
     param_map: &ParamMap,
     set_map: &SetMap,
-    index: &SetValMap,
+    idx_val_map: &IdxValMap,
 ) -> RecurseResult {
-    match expr {
+    match expr.clone() {
         Expr::Number(num) => RecurseResult::Number(num),
         Expr::VarSubscripted(var_or_param) => {
-            let name = var_or_param.var;
-            // let concrete: Option<Vec<SetIndex>> = var_or_param
-            //     .concrete
-            //     .map(|concrete| concrete.iter().map(|s| SetIndex::Str(s.clone())).collect());
+            let name = var_or_param.var.clone();
 
             let concrete: Option<Vec<SetIndex>> = if let Some(c) = var_or_param.concrete {
                 // Already resolved by sum expansion
@@ -268,60 +314,71 @@ fn recurse(
                     subscript
                         .indices
                         .iter()
-                        .map(|i| index.get(&i.var).unwrap().clone())
+                        .map(|i| idx_val_map.get(&i.var).unwrap().clone())
                         .collect()
                 })
             };
 
             if var_map.get(&name).is_some() {
-                return RecurseResult::Pairs(vec![Pair {
+                RecurseResult::Pairs(vec![Pair {
                     coeff: 1.0,
                     index: concrete,
                     var: name,
-                }]);
-            }
-
-            if let Some(param) = param_map.get(&name) {
-                return match &param.data {
+                }])
+            } else if let Some(param) = param_map.get(&name) {
+                match &param.data {
                     ParamArr::Scalar(num) => RecurseResult::Number(*num),
                     ParamArr::Arr(arr) => {
                         let arr_idx = concrete.expect("concrete is none");
                         if let Some(arr_val) = arr.get(&arr_idx) {
-                            return RecurseResult::Number(*arr_val);
+                            RecurseResult::Number(*arr_val)
                         } else {
                             match &param.default {
                                 Some(expr) => {
-                                    recurse(expr.clone(), var_map, param_map, set_map, index)
+                                    recurse(expr.clone(), var_map, param_map, set_map, idx_val_map)
                                 }
                                 None => panic!("tried to get uninitialized param: {}", &name),
                             }
                         }
                     }
                     ParamArr::Expr(expr) => {
-                        recurse(expr.clone(), var_map, param_map, set_map, index)
+                        recurse(expr.clone(), var_map, param_map, set_map, idx_val_map)
                     }
                     ParamArr::None => match &param.default {
-                        Some(expr) => recurse(expr.clone(), var_map, param_map, set_map, index),
+                        Some(expr) => {
+                            recurse(expr.clone(), var_map, param_map, set_map, idx_val_map)
+                        }
                         None => panic!("tried to get uninitialized param: {}", &name),
                     },
-                };
+                }
+            } else if let Some(index_val) = idx_val_map.get(&name) {
+                // Use the current index value (eg y=>2014) as an actual value
+                // Mostly (only?) used in domain condition expressions
+                match index_val {
+                    SetIndex::Str(_) => panic!("cannot use a string SetIndex here"),
+                    SetIndex::Int(num) => RecurseResult::Number(*num as f64),
+                }
+            } else {
+                panic!(
+                    "symbol does not point to a valid var or param. symbol: {} // constraint: {}",
+                    &name, &expr,
+                );
             }
-            panic!("symbol {} does not point to a valid var or param", &name);
         }
         Expr::FuncSum(func) => {
             let domain = func.domain;
             let operand = *func.operand;
 
-            let new_expr = expand_sum(&operand, &domain, index, var_map, param_map, set_map);
-            recurse(new_expr, var_map, param_map, set_map, index)
+            let new_expr = expand_sum(&operand, &domain, var_map, param_map, set_map, idx_val_map);
+            recurse(new_expr, var_map, param_map, set_map, idx_val_map)
         }
         Expr::FuncMin(_) => panic!("not implemented: FuncMin"),
         Expr::FuncMax(_) => panic!("not implemented: FuncMax"),
         Expr::Conditional(_) => panic!("not implemented: Conditional"),
         Expr::UnaryNeg(_) => panic!("not implemented: UnaryNeg"),
         Expr::BinOp { lhs, op, rhs } => {
-            let lhs = recurse(*lhs, var_map, param_map, set_map, index);
-            let rhs = recurse(*rhs, var_map, param_map, set_map, index);
+            let lhs = recurse(*lhs, var_map, param_map, set_map, idx_val_map);
+            let rhs = recurse(*rhs, var_map, param_map, set_map, idx_val_map);
 
             let debug_msg = format!("unhandled case: lhs:{:?} rhs:{:?} op:{}", &lhs, &rhs, op);
 
@@ -338,16 +395,23 @@ fn recurse(
                 (RecurseResult::Number(l), RecurseResult::Number(r), MathOp::Div) => {
                     RecurseResult::Number(l / r)
                 }
-                (RecurseResult::Number(l), RecurseResult::Pairs(pairs), MathOp::Mul) => {
+                (RecurseResult::Number(num), RecurseResult::Pairs(pairs), MathOp::Mul) => {
                     let res: Vec<Pair> = pairs
                         .iter()
                         .map(|p| Pair {
-                            coeff: l * p.coeff,
+                            coeff: num * p.coeff,
                             index: p.index.clone(),
                             var: p.var.clone(),
                         })
                         .collect();
                     RecurseResult::Pairs(res)
+                }
+                (RecurseResult::Pairs(pairs), RecurseResult::Number(num), MathOp::Add) => {
+                    if num == 0.0 {
+                        RecurseResult::Pairs(pairs)
+                    } else {
+                        panic!("must handle adding const to pairs: {}", debug_msg);
+                    }
                 }
                 (RecurseResult::Pairs(l_pairs), RecurseResult::Pairs(r_pairs), MathOp::Add) => {
                     RecurseResult::Pairs([l_pairs, r_pairs].concat())
@@ -445,7 +509,8 @@ fn print_bounds(model: &ModelWithData, var_map: &VarMap, param_map: &ParamMap, s
 
     for var in &model.vars {
         if let Some(bounds) = var.bounds.clone() {
-            let indexes = domain_to_indexes(&var.domain, var_map, param_map, set_map);
+            let indexes =
+                domain_to_indexes(&var.domain, var_map, param_map, set_map, &HashMap::new());
             let dir = rel_op_to_bounds(&bounds.op);
             let name = var.name.clone();
             let val = bounds.value;
@@ -471,6 +536,7 @@ fn domain_to_indexes(
     var_map: &VarMap,
     param_map: &ParamMap,
     set_map: &SetMap,
+    idx_val_map: &IdxValMap,
 ) -> SetArr {
     match domain {
         None => vec![vec![]],
@@ -484,18 +550,23 @@ fn domain_to_indexes(
                 .filter_map(|idx| match condition {
                     None => Some(idx),
                     Some(logic) => {
-                        let con_index_vals: SetValMap = parts
+                        let local_idx_map: IdxValMap = parts
                             .iter()
                             .zip(idx.iter())
                             .map(|(part, idx)| (part.var.clone(), idx.clone()))
                             .collect();
+                        let merged_idx_map = {
+                            let mut m = idx_val_map.clone();
+                            m.extend(local_idx_map);
+                            m
+                        };
 
                         if check_domain_condition(
                             logic,
                             var_map,
                             param_map,
                             set_map,
-                            &con_index_vals,
+                            &merged_idx_map,
                         ) {
                             Some(idx)
                         } else {
@@ -513,12 +584,12 @@ fn check_domain_condition(
     var_map: &VarMap,
     param_map: &ParamMap,
     set_map: &SetMap,
-    index: &SetValMap,
+    idx_val_map: &IdxValMap,
 ) -> bool {
     match logic {
         LogicExpr::Comparison { lhs, op, rhs } => {
-            let lhs = recurse(lhs.clone(), var_map, param_map, set_map, index);
-            let rhs = recurse(rhs.clone(), var_map, param_map, set_map, index);
+            let lhs = recurse(lhs.clone(), var_map, param_map, set_map, idx_val_map);
+            let rhs = recurse(rhs.clone(), var_map, param_map, set_map, idx_val_map);
 
             match (lhs, rhs, op) {
                 (RecurseResult::Number(lhs), RecurseResult::Number(rhs), RelOp::Eq) => lhs == rhs,
@@ -531,8 +602,8 @@ fn check_domain_condition(
             }
         }
         LogicExpr::BoolOp { lhs, op, rhs } => {
-            let lhs = check_domain_condition(lhs, var_map, param_map, set_map, index);
-            let rhs = check_domain_condition(rhs, var_map, param_map, set_map, index);
+            let lhs = check_domain_condition(lhs, var_map, param_map, set_map, idx_val_map);
+            let rhs = check_domain_condition(rhs, var_map, param_map, set_map, idx_val_map);
             match op {
                 BoolOp::And => lhs && rhs,
                 BoolOp::Or => lhs || rhs,
@@ -544,17 +615,23 @@ fn check_domain_condition(
 fn expand_sum(
     operand: &Expr,
     sum_domain: &Domain,
-    con_index_vals: &SetValMap, // bindings from constraint iteration
     var_map: &VarMap,
     param_map: &ParamMap,
     set_map: &SetMap,
+    idx_val_map: &IdxValMap,
 ) -> Expr {
-    let sum_indexes = domain_to_indexes(&Some(sum_domain.clone()), var_map, param_map, set_map);
+    let sum_indexes = domain_to_indexes(
+        &Some(sum_domain.clone()),
+        var_map,
+        param_map,
+        set_map,
+        idx_val_map,
+    );
 
     let substituted: Vec<Expr> = sum_indexes
         .iter()
         .map(|idx_combo| {
-            let mut var_map = con_index_vals.clone();
+            let mut var_map = idx_val_map.clone();
             for (part, idx) in sum_domain.parts.iter().zip(idx_combo.iter()) {
                 var_map.insert(part.var.clone(), idx.clone());
             }
@@ -572,7 +649,7 @@ fn expand_sum(
         .unwrap_or(Expr::Number(0.0))
 }
 
-fn substitute_vars(expr: &Expr, con_index_vals: &SetValMap) -> Expr {
+fn substitute_vars(expr: &Expr, con_index_vals: &IdxValMap) -> Expr {
     match expr {
         Expr::VarSubscripted(vs) => {
             if let Some(subscript) = &vs.subscript {
