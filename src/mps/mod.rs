@@ -12,6 +12,7 @@ use crate::{
 use itertools::Itertools;
 
 type SetMap = IndexMap<String, Vec<SetIndex>>;
+type SetValMap = HashMap<String, SetIndex>;
 type SetArr = Vec<Vec<SetIndex>>;
 type VarMap = HashMap<String, bool>;
 type ParamMap = HashMap<String, ParamArr>;
@@ -19,8 +20,9 @@ enum ParamArr {
     Arr(HashMap<Vec<SetIndex>, f64>),
     Scalar(f64),
 }
-//                  var       set_index        constraint    val
-type Cols = IndexMap<(String, Vec<SetIndex>), IndexMap<String, f64>>;
+//                    var       var_index               con         con_index   val
+type Cols = IndexMap<(String, Vec<SetIndex>), IndexMap<(String, Vec<SetIndex>), f64>>;
+type RowMap = IndexMap<(String, Vec<SetIndex>), (String, Option<f64>)>;
 
 // const SENTINEL: SetIndex = SetIndex::Int(u64::MAX);
 
@@ -31,21 +33,6 @@ pub fn compile_mps(model: ModelWithData) {
         .into_iter()
         .map(|set| (set.decl.name, set.data.unwrap().values))
         .collect();
-
-    // let set_indexes: SetArr = set_map.into_values().multi_cartesian_product().collect();
-
-    // let set_indexes: SetArr = {
-    //     let result: SetArr = set_map
-    //         .clone()
-    //         .into_values()
-    //         .multi_cartesian_product()
-    //         .collect();
-    //     if result.is_empty() {
-    //         vec![vec![]]
-    //     } else {
-    //         result
-    //     }
-    // };
 
     let var_map: VarMap = model
         .vars
@@ -62,14 +49,14 @@ pub fn compile_mps(model: ModelWithData) {
         .collect();
 
     // Constraints
+    let mut rows: RowMap = IndexMap::new();
     let mut cols: Cols = IndexMap::new();
-    let mut rhs: IndexMap<String, f64> = IndexMap::new();
 
     // First the objective alone
     {
         // Objective is always "singular"
         // it has no domain
-        let index = vec![];
+        let index: SetValMap = HashMap::new();
 
         let pairs = recurse(
             model.objective.expr.clone(),
@@ -88,33 +75,56 @@ pub fn compile_mps(model: ModelWithData) {
                 pair.index.clone().unwrap_or_else(Vec::new),
             ))
             .or_default()
-            .insert(model.objective.name.clone(), pair.coeff);
+            .insert((model.objective.name.clone(), vec![]), pair.coeff);
         }
+        rows.insert(
+            (model.objective.name.clone(), vec![]),
+            ("N".to_string(), None),
+        );
     }
 
     // Then all the actual constraints
     for constraint in &model.constraints {
         let con_indexes = domain_to_indexes(&constraint.domain, &set_map);
-        for index in con_indexes {
-            let built = build_constraint(constraint, &var_map, &param_map, &set_map, &index);
-            if let Some(num) = built.rhs {
-                rhs.insert(constraint.name.clone(), num);
-            }
+
+        for con_index in con_indexes {
+            let con_index_vals: SetValMap = constraint
+                .clone()
+                .domain
+                .unwrap_or_else(|| Domain {
+                    parts: vec![],
+                    condition: None,
+                })
+                .parts
+                .iter()
+                .zip(con_index.iter())
+                .map(|(part, idx)| (part.var.clone(), idx.clone()))
+                .collect();
+
+            let built =
+                build_constraint(constraint, &var_map, &param_map, &set_map, &con_index_vals);
+
+            let dir = rel_op_to_row_type(&constraint.constraint_expr.op);
+            rows.insert(
+                (constraint.name.clone(), con_index.clone()),
+                (dir, built.rhs),
+            );
+
             for pair in &built.pairs {
                 cols.entry((
                     pair.var.clone(),
                     pair.index.clone().unwrap_or_else(Vec::new),
                 ))
                 .or_default()
-                .insert(constraint.name.clone(), pair.coeff);
+                .insert((constraint.name.clone(), con_index.clone()), pair.coeff);
             }
         }
     }
 
     print_name();
-    print_rows(&model);
+    print_rows(&rows);
     print_cols(cols);
-    print_rhs(rhs);
+    print_rhs(&rows);
     print_bounds(&model, &set_map);
     println!("ENDATA");
 }
@@ -131,7 +141,18 @@ fn resolve_param(param: ParamWithData) -> ParamArr {
                 }
                 ParamArr::Arr(arr)
             }
-            ParamDataBody::Tables(_) => panic!("param data tables not implemented"),
+            ParamDataBody::Tables(tables) => {
+                let mut arr: HashMap<Vec<SetIndex>, f64> = HashMap::new();
+                // TODO do something with paramdata.target
+                for table in tables {
+                    for row in table.rows {
+                        for (col, value) in table.cols.iter().zip(row.values.iter()) {
+                            arr.insert(vec![row.label.clone(), col.clone()], *value);
+                        }
+                    }
+                }
+                ParamArr::Arr(arr)
+            }
         }
     } else if let Some(default) = data.default {
         ParamArr::Scalar(default)
@@ -145,7 +166,7 @@ fn build_constraint(
     var_map: &VarMap,
     param_map: &ParamMap,
     set_map: &SetMap,
-    index: &Vec<SetIndex>,
+    index: &SetValMap,
 ) -> BuiltConstraint {
     let lhs = recurse(
         constraint.constraint_expr.lhs.clone(),
@@ -183,15 +204,34 @@ fn recurse(
     var_map: &VarMap,
     param_map: &ParamMap,
     set_map: &SetMap,
-    _index: &Vec<SetIndex>,
+    index: &SetValMap,
 ) -> RecurseResult {
     match expr {
         Expr::Number(num) => RecurseResult::Number(num),
         Expr::VarSubscripted(var_or_param) => {
             let name = var_or_param.var;
-            let concrete: Option<Vec<SetIndex>> = var_or_param
-                .concrete
-                .map(|concrete| concrete.iter().map(|s| SetIndex::Str(s.clone())).collect());
+            // let concrete: Option<Vec<SetIndex>> = var_or_param
+            //     .concrete
+            //     .map(|concrete| concrete.iter().map(|s| SetIndex::Str(s.clone())).collect());
+
+            let concrete: Option<Vec<SetIndex>> = if let Some(c) = var_or_param.concrete {
+                // Already resolved by sum expansion
+                Some(c.iter().map(|s| SetIndex::Str(s.clone())).collect())
+            } else {
+                var_or_param.subscript.as_ref().map(|subscript| {
+                    subscript
+                        .indices
+                        .iter()
+                        .map(|i| {
+                            index
+                                .get(&i.var)
+                                .unwrap_or_else(|| panic!("unbound variable: {}", i.var))
+                                .clone()
+                        })
+                        .collect()
+                })
+            };
+
             if var_map.get(&name).is_some() {
                 return RecurseResult::Pairs(vec![Pair {
                     coeff: 1.0,
@@ -203,7 +243,6 @@ fn recurse(
             if let Some(param) = param_map.get(&name) {
                 return match param {
                     ParamArr::Scalar(num) => RecurseResult::Number(*num),
-                    // TODO need to merge concrete and index somehow
                     ParamArr::Arr(arr) => {
                         RecurseResult::Number(*arr.get(&concrete.unwrap()).unwrap())
                     }
@@ -215,19 +254,17 @@ fn recurse(
         Expr::FuncSum(func) => {
             let domain = func.domain;
             let operand = *func.operand;
-            let indexes = domain_to_indexes(&Some(domain.clone()), set_map);
-            let domain_vars: Vec<String> = domain.parts.iter().map(|d| d.var.clone()).collect();
 
-            let new_expr = expand_sum(&operand, &domain_vars, &indexes);
-            recurse(new_expr, var_map, param_map, set_map, _index)
+            let new_expr = expand_sum(&operand, &domain, index, set_map);
+            recurse(new_expr, var_map, param_map, set_map, index)
         }
         Expr::FuncMin(_) => panic!("not implemented: FuncMin"),
         Expr::FuncMax(_) => panic!("not implemented: FuncMax"),
         Expr::Conditional(_) => panic!("not implemented: Conditional"),
         Expr::UnaryNeg(_) => panic!("not implemented: UnaryNeg"),
         Expr::BinOp { lhs, op, rhs } => {
-            let lhs = recurse(*lhs, var_map, param_map, set_map, _index);
-            let rhs = recurse(*rhs, var_map, param_map, set_map, _index);
+            let lhs = recurse(*lhs, var_map, param_map, set_map, index);
+            let rhs = recurse(*rhs, var_map, param_map, set_map, index);
 
             let debug_msg = format!("unhandled case: lhs:{:?} rhs:{:?} op:{}", &lhs, &rhs, op);
 
@@ -308,38 +345,35 @@ fn rel_op_to_bounds(op: &RelOp) -> String {
     }
 }
 
-fn print_rows(model: &ModelWithData) {
+fn print_rows(rows: &RowMap) {
     println!("ROWS");
-
-    // Objective
-    {
-        let dir = "N";
-        let name = model.objective.name.clone();
-        println!(" {dir}  {name}");
-    }
-
-    for constraint in &model.constraints {
-        let dir = rel_op_to_row_type(&constraint.constraint_expr.op);
-        let name = constraint.name.clone();
-        println!(" {dir}  {name}")
+    for ((name, idx), (dir, _)) in rows {
+        let idx = format_set_index(idx);
+        println!(" {dir}  {name}{idx}")
     }
 }
 
 fn print_cols(cols: Cols) {
     println!("COLUMNS");
     for ((var_name, set_index), con_map) in cols {
-        for (con_name, val) in con_map {
-            let idx = format_set_index(&set_index);
-            println!("    {}{}      {}         {}", var_name, idx, con_name, val);
+        for ((con_name, con_index), val) in con_map {
+            let var_idx = format_set_index(&set_index);
+            let con_idx = format_set_index(&con_index);
+            println!(
+                "    {}{}      {}{}         {}",
+                var_name, var_idx, con_name, con_idx, val
+            );
         }
     }
 }
 
-fn print_rhs(rhs: IndexMap<String, f64>) {
+fn print_rhs(rows: &RowMap) {
     println!("RHS");
-
-    for (con_name, val) in rhs {
-        println!("    RHS1      {}       {}", con_name, val);
+    for ((name, idx), (_, val)) in rows {
+        if let Some(num) = val {
+            let idx = format_set_index(idx);
+            println!("    RHS1      {name}{idx}       {num}");
+        }
     }
 }
 
@@ -387,10 +421,23 @@ fn domain_to_indexes(domain: &Option<Domain>, set_map: &SetMap) -> SetArr {
     }
 }
 
-fn expand_sum(operand: &Expr, domain_vars: &[String], indexes: &[Vec<SetIndex>]) -> Expr {
-    let substituted: Vec<Expr> = indexes
+fn expand_sum(
+    operand: &Expr,
+    sum_domain: &Domain,
+    con_index_vals: &SetValMap, // bindings from constraint iteration
+    set_map: &SetMap,
+) -> Expr {
+    let sum_indexes = domain_to_indexes(&Some(sum_domain.clone()), set_map);
+
+    let substituted: Vec<Expr> = sum_indexes
         .iter()
-        .map(|idx_combo| substitute_index(operand, domain_vars, idx_combo))
+        .map(|idx_combo| {
+            let mut var_map = con_index_vals.clone();
+            for (part, idx) in sum_domain.parts.iter().zip(idx_combo.iter()) {
+                var_map.insert(part.var.clone(), idx.clone());
+            }
+            substitute_vars(operand, &var_map)
+        })
         .collect();
 
     substituted
@@ -403,22 +450,17 @@ fn expand_sum(operand: &Expr, domain_vars: &[String], indexes: &[Vec<SetIndex>])
         .unwrap_or(Expr::Number(0.0))
 }
 
-fn substitute_index(expr: &Expr, domain_vars: &[String], idx_combo: &[SetIndex]) -> Expr {
+fn substitute_vars(expr: &Expr, con_index_vals: &SetValMap) -> Expr {
     match expr {
         Expr::VarSubscripted(vs) => {
             if let Some(subscript) = &vs.subscript {
                 let concrete: Vec<String> = subscript
                     .indices
                     .iter()
-                    .map(|i| {
-                        if let Some(pos) = domain_vars.iter().position(|dv| dv == &i.var) {
-                            match &idx_combo[pos] {
-                                SetIndex::Str(s) => s.clone(),
-                                SetIndex::Int(n) => n.to_string(),
-                            }
-                        } else {
-                            i.var.clone() // not a domain var, keep as-is
-                        }
+                    .map(|i| match con_index_vals.get(&i.var) {
+                        Some(SetIndex::Str(s)) => s.clone(),
+                        Some(SetIndex::Int(n)) => n.to_string(),
+                        None => panic!("unbound variable: {}", i.var),
                     })
                     .collect();
 
@@ -431,14 +473,12 @@ fn substitute_index(expr: &Expr, domain_vars: &[String], idx_combo: &[SetIndex])
             Expr::VarSubscripted(vs.clone())
         }
         Expr::BinOp { lhs, op, rhs } => Expr::BinOp {
-            lhs: Box::new(substitute_index(lhs, domain_vars, idx_combo)),
+            lhs: Box::new(substitute_vars(lhs, con_index_vals)),
             op: op.clone(),
-            rhs: Box::new(substitute_index(rhs, domain_vars, idx_combo)),
+            rhs: Box::new(substitute_vars(rhs, con_index_vals)),
         },
         Expr::Number(n) => Expr::Number(*n),
-        Expr::UnaryNeg(inner) => {
-            Expr::UnaryNeg(Box::new(substitute_index(inner, domain_vars, idx_combo)))
-        }
+        Expr::UnaryNeg(inner) => Expr::UnaryNeg(Box::new(substitute_vars(inner, con_index_vals))),
         _ => todo!("handle other variants"),
     }
 }

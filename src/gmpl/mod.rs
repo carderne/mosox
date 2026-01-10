@@ -562,14 +562,14 @@ impl fmt::Display for SetIndex {
 #[derive(Clone, Debug)]
 pub struct ParamDataTable {
     pub target: Option<Vec<ParamDataTarget>>,
-    pub cols: Vec<String>,
+    pub cols: Vec<SetIndex>,
     pub rows: Vec<ParamDataRow>,
 }
 
 impl ParamDataTable {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
         let mut target = None;
-        let mut cols = Vec::new();
+        let mut cols: Vec<SetIndex> = Vec::new();
         let mut rows = Vec::new();
 
         for pair in entry.into_inner() {
@@ -590,7 +590,12 @@ impl ParamDataTable {
                 Rule::param_data_cols => {
                     for inner in pair.into_inner() {
                         if inner.as_rule() == Rule::set_index {
-                            cols.push(inner.as_str().to_string());
+                            let raw = inner.as_str();
+                            let col = raw
+                                .parse::<u64>()
+                                .map(SetIndex::Int)
+                                .unwrap_or_else(|_| SetIndex::Str(raw.to_string()));
+                            cols.push(col);
                         }
                     }
                 }
@@ -631,20 +636,25 @@ impl fmt::Display for ParamDataTarget {
 /// Parameter data row
 #[derive(Clone, Debug)]
 pub struct ParamDataRow {
-    pub label: String,
+    pub label: SetIndex,
     pub values: Vec<f64>,
 }
 
 impl ParamDataRow {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
-        let mut label = String::new();
+        let mut label: Option<SetIndex> = None;
         let mut values = Vec::new();
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::set_index => {
-                    if label.is_empty() {
-                        label = pair.as_str().to_string();
+                    if label.is_none() {
+                        let raw = pair.as_str();
+                        label = Some(
+                            raw.parse::<u64>()
+                                .map(SetIndex::Int)
+                                .unwrap_or_else(|_| SetIndex::Str(raw.to_string())),
+                        );
                     }
                 }
                 Rule::param_data_row_vals => {
@@ -659,7 +669,10 @@ impl ParamDataRow {
             }
         }
 
-        Self { label, values }
+        Self {
+            label: label.unwrap(),
+            values,
+        }
     }
 }
 

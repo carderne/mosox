@@ -1,10 +1,3 @@
-* Problem:    example_3
-* Class:      LP
-* Rows:       6
-* Columns:    6
-* Non-zeros:  18
-* Format:     Free MPS
-*
 NAME example_3
 ROWS
  N total_cost
@@ -33,7 +26,9 @@ COLUMNS
  ship[P2,W3] supply_limit[P2] 1
  ship[P2,W3] meet_demand[W3] 1
 RHS
- RHS1 supply_limit[P1] 100 supply_limit[P2] 150
- RHS1 meet_demand[W1] 80 meet_demand[W2] 70
+ RHS1 supply_limit[P1] 100
+ RHS1 supply_limit[P2] 150
+ RHS1 meet_demand[W1] 80
+ RHS1 meet_demand[W2] 70
  RHS1 meet_demand[W3] 50
 ENDATA

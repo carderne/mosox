@@ -100,12 +100,6 @@ impl ModelWithData {
             }
         }
 
-        // Sort model statements alphabetically by name
-        sets.sort_by(|a, b| a.name.cmp(&b.name));
-        params.sort_by(|a, b| a.name.cmp(&b.name));
-        vars.sort_by(|a, b| a.name.cmp(&b.name));
-        constraints.sort_by(|a, b| a.name.cmp(&b.name));
-
         // Create lookup maps for matching
         let mut set_map: HashMap<String, Set> = HashMap::new();
         for set in sets {
