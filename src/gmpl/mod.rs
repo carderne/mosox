@@ -1,7 +1,7 @@
 pub mod atoms;
 mod expr;
 
-pub use expr::{Expr, ExprOrLiteral};
+pub use expr::{Expr, LogicExpr};
 
 use std::fmt;
 
@@ -73,9 +73,9 @@ pub struct Param {
     pub domain: Option<Domain>,
     pub param_type: Option<ParamType>,
     pub conditions: Vec<ParamCondition>,
-    pub param_in: Option<ExprOrLiteral>,
-    pub default: Option<ExprOrLiteral>,
-    pub assign: Option<ExprOrLiteral>,
+    pub param_in: Option<Expr>,
+    pub default: Option<Expr>,
+    pub assign: Option<Expr>,
 }
 
 impl Param {
@@ -94,23 +94,19 @@ impl Param {
                 Rule::domain => domain = Some(Domain::from_entry(pair)),
                 Rule::param_type => param_type = Some(ParamType::from_entry(pair)),
                 Rule::param_condition => conditions.push(ParamCondition::from_entry(pair)),
-                Rule::param_in => {
-                    param_in = pair
-                        .into_inner()
-                        .next()
-                        .map(|p| ExprOrLiteral::from_entry(p))
-                }
+                Rule::param_in => param_in = pair.into_inner().next().map(|p| Expr::from_entry(p)),
                 Rule::param_default => {
-                    default = pair
+                    if let Some(p) = pair
                         .into_inner()
                         .next()
-                        .map(|p| ExprOrLiteral::from_entry(p))
+                        // ignore symbolic string_literal -> only used for file path
+                        .filter(|p| p.as_rule() == Rule::expr)
+                    {
+                        default = Some(Expr::from_entry(p));
+                    }
                 }
                 Rule::param_assign => {
-                    assign = pair
-                        .into_inner()
-                        .next()
-                        .map(|p| ExprOrLiteral::from_entry(p))
+                    assign = pair.into_inner().next().map(|p| Expr::from_entry(p))
                 }
                 _ => {}
             }
@@ -499,7 +495,7 @@ impl fmt::Display for VarBounds {
 #[derive(Clone, Debug)]
 pub struct ParamCondition {
     pub op: RelOp,
-    pub value: ExprOrLiteral,
+    pub value: Expr,
 }
 
 impl ParamCondition {
@@ -510,10 +506,7 @@ impl ParamCondition {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::rel_op => op = RelOp::from_entry(pair),
-                Rule::expr => value = Some(ExprOrLiteral::Expr(Expr::from_entry(pair))),
-                Rule::string_literal => {
-                    value = Some(ExprOrLiteral::StringLiteral(pair.as_str().to_string()))
-                }
+                Rule::expr => value = Some(Expr::from_entry(pair)),
                 _ => {}
             }
         }

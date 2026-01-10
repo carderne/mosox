@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use indexmap::IndexMap;
 
-use crate::gmpl::atoms::{Domain, RelOp, VarSubscripted};
-use crate::gmpl::{ParamDataBody, SetIndex};
+use crate::gmpl::atoms::{BoolOp, Domain, RelOp, VarSubscripted};
+use crate::gmpl::{LogicExpr, ParamDataBody, SetIndex};
 use crate::model::ParamWithData;
 use crate::{
     gmpl::{Constraint, Expr, atoms::MathOp},
@@ -19,12 +19,12 @@ type ParamMap = HashMap<String, ParamArr>;
 enum ParamArr {
     Arr(HashMap<Vec<SetIndex>, f64>),
     Scalar(f64),
+    Expr(Expr),
+    None,
 }
 //                    var       var_index               con         con_index   val
 type Cols = IndexMap<(String, Vec<SetIndex>), IndexMap<(String, Vec<SetIndex>), f64>>;
 type RowMap = IndexMap<(String, Vec<SetIndex>), (String, Option<f64>)>;
-
-// const SENTINEL: SetIndex = SetIndex::Int(u64::MAX);
 
 pub fn compile_mps(model: ModelWithData) {
     let set_map: SetMap = model
@@ -85,7 +85,7 @@ pub fn compile_mps(model: ModelWithData) {
 
     // Then all the actual constraints
     for constraint in &model.constraints {
-        let con_indexes = domain_to_indexes(&constraint.domain, &set_map);
+        let con_indexes = domain_to_indexes(&constraint.domain, &var_map, &param_map, &set_map);
 
         for con_index in con_indexes {
             let con_index_vals: SetValMap = constraint
@@ -125,40 +125,49 @@ pub fn compile_mps(model: ModelWithData) {
     print_rows(&rows);
     print_cols(cols);
     print_rhs(&rows);
-    print_bounds(&model, &set_map);
+    print_bounds(&model, &var_map, &param_map, &set_map);
     println!("ENDATA");
 }
 
 fn resolve_param(param: ParamWithData) -> ParamArr {
-    let data = param.data.unwrap();
-    if let Some(body) = data.body {
-        match body {
-            ParamDataBody::Num(num) => ParamArr::Scalar(num),
-            ParamDataBody::List(pairs) => {
-                let mut arr: HashMap<Vec<SetIndex>, f64> = HashMap::new();
-                for pair in pairs {
-                    arr.insert(vec![pair.key], pair.value);
+    if let Some(data) = param.data {
+        if let Some(body) = data.body {
+            match body {
+                ParamDataBody::Num(num) => ParamArr::Scalar(num),
+                ParamDataBody::List(pairs) => {
+                    let mut arr: HashMap<Vec<SetIndex>, f64> = HashMap::new();
+                    for pair in pairs {
+                        arr.insert(vec![pair.key], pair.value);
+                    }
+                    return ParamArr::Arr(arr);
                 }
-                ParamArr::Arr(arr)
-            }
-            ParamDataBody::Tables(tables) => {
-                let mut arr: HashMap<Vec<SetIndex>, f64> = HashMap::new();
-                // TODO do something with paramdata.target
-                for table in tables {
-                    for row in table.rows {
-                        for (col, value) in table.cols.iter().zip(row.values.iter()) {
-                            arr.insert(vec![row.label.clone(), col.clone()], *value);
+                ParamDataBody::Tables(tables) => {
+                    let mut arr: HashMap<Vec<SetIndex>, f64> = HashMap::new();
+                    // TODO do something with paramdata.target
+                    for table in tables {
+                        for row in table.rows {
+                            for (col, value) in table.cols.iter().zip(row.values.iter()) {
+                                arr.insert(vec![row.label.clone(), col.clone()], *value);
+                            }
                         }
                     }
+                    return ParamArr::Arr(arr);
                 }
-                ParamArr::Arr(arr)
-            }
-        }
-    } else if let Some(default) = data.default {
-        ParamArr::Scalar(default)
-    } else {
-        panic!("param data body is incomplete");
+            };
+        } else if let Some(default) = data.default {
+            return ParamArr::Scalar(default);
+        };
     }
+
+    if let Some(expr) = param.decl.assign {
+        return ParamArr::Expr(expr);
+    } else if let Some(default) = param.decl.default {
+        return ParamArr::Expr(default);
+    };
+
+    println!("param not resolved: {}", param.decl.name.clone());
+    // No value was set, if we ever need this value it's an error
+    ParamArr::None
 }
 
 fn build_constraint(
@@ -222,12 +231,7 @@ fn recurse(
                     subscript
                         .indices
                         .iter()
-                        .map(|i| {
-                            index
-                                .get(&i.var)
-                                .unwrap_or_else(|| panic!("unbound variable: {}", i.var))
-                                .clone()
-                        })
+                        .map(|i| index.get(&i.var).unwrap().clone())
                         .collect()
                 })
             };
@@ -244,8 +248,16 @@ fn recurse(
                 return match param {
                     ParamArr::Scalar(num) => RecurseResult::Number(*num),
                     ParamArr::Arr(arr) => {
-                        RecurseResult::Number(*arr.get(&concrete.unwrap()).unwrap())
+                        let arr_idx = concrete.expect("concrete is none");
+                        RecurseResult::Number(*arr.get(&arr_idx).unwrap_or_else(|| {
+                            dbg!("no param arr at: {} {}", &name, &arr_idx, &arr);
+                            panic!("no param arr");
+                        }))
                     }
+                    ParamArr::Expr(expr) => {
+                        recurse(expr.clone(), var_map, param_map, set_map, index)
+                    }
+                    ParamArr::None => panic!("tried to get uninitialized param: {}", &name),
                 };
             }
 
@@ -255,7 +267,7 @@ fn recurse(
             let domain = func.domain;
             let operand = *func.operand;
 
-            let new_expr = expand_sum(&operand, &domain, index, set_map);
+            let new_expr = expand_sum(&operand, &domain, index, var_map, param_map, set_map);
             recurse(new_expr, var_map, param_map, set_map, index)
         }
         Expr::FuncMin(_) => panic!("not implemented: FuncMin"),
@@ -377,12 +389,12 @@ fn print_rhs(rows: &RowMap) {
     }
 }
 
-fn print_bounds(model: &ModelWithData, set_map: &SetMap) {
+fn print_bounds(model: &ModelWithData, var_map: &VarMap, param_map: &ParamMap, set_map: &SetMap) {
     println!("BOUNDS");
 
     for var in &model.vars {
         if let Some(bounds) = var.bounds.clone() {
-            let indexes = domain_to_indexes(&var.domain, set_map);
+            let indexes = domain_to_indexes(&var.domain, var_map, param_map, set_map);
             let dir = rel_op_to_bounds(&bounds.op);
             let name = var.name.clone();
             let val = bounds.value;
@@ -403,20 +415,77 @@ fn format_set_index(v: &[SetIndex]) -> String {
     }
 }
 
-fn domain_to_indexes(domain: &Option<Domain>, set_map: &SetMap) -> SetArr {
+fn domain_to_indexes(
+    domain: &Option<Domain>,
+    var_map: &VarMap,
+    param_map: &ParamMap,
+    set_map: &SetMap,
+) -> SetArr {
     match domain {
         None => vec![vec![]],
         Some(dom) => {
             let Domain { parts, condition } = dom;
-            if condition.is_some() {
-                panic!("domain conditions unhandled");
-            }
-            let sets: Vec<Vec<SetIndex>> = parts
+
+            parts
                 .iter()
                 .map(|p| set_map.get(&p.set).unwrap().clone())
                 .multi_cartesian_product()
-                .collect();
-            sets
+                .filter_map(|idx| match condition {
+                    None => Some(idx),
+                    Some(logic) => {
+                        let con_index_vals: SetValMap = parts
+                            .iter()
+                            .zip(idx.iter())
+                            .map(|(part, idx)| (part.var.clone(), idx.clone()))
+                            .collect();
+
+                        if check_domain_condition(
+                            logic,
+                            var_map,
+                            param_map,
+                            set_map,
+                            &con_index_vals,
+                        ) {
+                            Some(idx)
+                        } else {
+                            None
+                        }
+                    }
+                })
+                .collect()
+        }
+    }
+}
+
+fn check_domain_condition(
+    logic: &LogicExpr,
+    var_map: &VarMap,
+    param_map: &ParamMap,
+    set_map: &SetMap,
+    index: &SetValMap,
+) -> bool {
+    match logic {
+        LogicExpr::Comparison { lhs, op, rhs } => {
+            let lhs = recurse(lhs.clone(), var_map, param_map, set_map, index);
+            let rhs = recurse(rhs.clone(), var_map, param_map, set_map, index);
+
+            match (lhs, rhs, op) {
+                (RecurseResult::Number(lhs), RecurseResult::Number(rhs), RelOp::Eq) => lhs == rhs,
+                (RecurseResult::Number(lhs), RecurseResult::Number(rhs), RelOp::Ne) => lhs != rhs,
+                (RecurseResult::Number(lhs), RecurseResult::Number(rhs), RelOp::Gt) => lhs >= rhs,
+                (RecurseResult::Number(lhs), RecurseResult::Number(rhs), RelOp::Ge) => lhs >= rhs,
+                (RecurseResult::Number(lhs), RecurseResult::Number(rhs), RelOp::Lt) => lhs <= rhs,
+                (RecurseResult::Number(lhs), RecurseResult::Number(rhs), RelOp::Le) => lhs <= rhs,
+                _ => panic!("unhandled logic expr: {}", logic),
+            }
+        }
+        LogicExpr::BoolOp { lhs, op, rhs } => {
+            let lhs = check_domain_condition(lhs, var_map, param_map, set_map, index);
+            let rhs = check_domain_condition(rhs, var_map, param_map, set_map, index);
+            match op {
+                BoolOp::And => lhs && rhs,
+                BoolOp::Or => lhs || rhs,
+            }
         }
     }
 }
@@ -425,9 +494,11 @@ fn expand_sum(
     operand: &Expr,
     sum_domain: &Domain,
     con_index_vals: &SetValMap, // bindings from constraint iteration
+    var_map: &VarMap,
+    param_map: &ParamMap,
     set_map: &SetMap,
 ) -> Expr {
-    let sum_indexes = domain_to_indexes(&Some(sum_domain.clone()), set_map);
+    let sum_indexes = domain_to_indexes(&Some(sum_domain.clone()), var_map, param_map, set_map);
 
     let substituted: Vec<Expr> = sum_indexes
         .iter()

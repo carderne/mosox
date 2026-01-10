@@ -103,116 +103,72 @@ impl fmt::Display for Expr {
     }
 }
 
-/// Logical expression
+static LOGIC_PRATT: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
+    PrattParser::new()
+        // Precedence: and > or (standard convention)
+        .op(Op::infix(Rule::bool_or, Left))
+        .op(Op::infix(Rule::bool_and, Left))
+});
+
+/// Logical expression - recursive tree structure with proper operator precedence
 #[derive(Clone, Debug)]
-pub struct LogicExpr {
-    pub parts: Vec<LogicExprPart>,
-    pub operators: Vec<BoolOp>,
+pub enum LogicExpr {
+    Comparison {
+        lhs: Expr,
+        op: RelOp,
+        rhs: Expr,
+    },
+    BoolOp {
+        lhs: Box<LogicExpr>,
+        op: BoolOp,
+        rhs: Box<LogicExpr>,
+    },
 }
 
 impl LogicExpr {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
-        let mut parts = Vec::new();
-        let mut operators = Vec::new();
-
-        let inner: Vec<_> = entry.into_inner().collect();
-        for (i, pair) in inner.iter().enumerate() {
-            match pair.as_rule() {
-                Rule::logic_expr_compound => {
-                    // Extract inner logic_expr from compound
-                    let inner_logic = pair.clone().into_inner().next().unwrap();
-                    parts.push(LogicExprPart::Compound(Box::new(LogicExpr::from_entry(
-                        inner_logic,
-                    ))));
-                }
-                Rule::expr => {
-                    // This is the start of a comparison (expr rel_op expr)
-                    if i + 2 < inner.len()
-                        && let (Some(op_pair), Some(rhs_pair)) =
-                            (inner.get(i + 1), inner.get(i + 2))
-                        && op_pair.as_rule() == Rule::rel_op
-                    {
-                        let lhs = ExprOrLiteral::Expr(Expr::from_entry(pair.clone()));
-                        let op = RelOp::from_entry(op_pair.clone());
-                        let rhs = ExprOrLiteral::Expr(Expr::from_entry(rhs_pair.clone()));
-                        parts.push(LogicExprPart::Comparison { lhs, op, rhs });
-                    }
-                }
-                Rule::string_literal => {
-                    // Part of a comparison with string literal
-                    if i > 0
-                        && i + 1 < inner.len()
-                        && let Some(prev) = inner.get(i - 1)
-                        && prev.as_rule() == Rule::rel_op
-                    {
-                        // Already handled in previous iteration
-                        continue;
-                    }
-                }
-                Rule::bool => operators.push(BoolOp::from_entry(pair.clone())),
-                Rule::rel_op => {
-                    // Skip, handled with expr
-                }
-                _ => {}
-            }
-        }
-
-        Self { parts, operators }
+        parse_logic_expr(entry.into_inner())
     }
+}
+
+/// Parse logical expression using Pratt parser for correct precedence
+fn parse_logic_expr(pairs: Pairs<Rule>) -> LogicExpr {
+    LOGIC_PRATT
+        .map_primary(|primary| match primary.as_rule() {
+            Rule::comparison => {
+                let mut inner = primary.into_inner();
+                let lhs = Expr::from_entry(inner.next().unwrap());
+                let op = RelOp::from_entry(inner.next().unwrap());
+                let rhs = Expr::from_entry(inner.next().unwrap());
+                LogicExpr::Comparison { lhs, op, rhs }
+            }
+            Rule::logic_compound => {
+                let inner = primary.into_inner().next().unwrap();
+                parse_logic_expr(inner.into_inner())
+            }
+            Rule::logic_expr => parse_logic_expr(primary.into_inner()),
+            rule => unreachable!("Expected logic primary, found {:?}", rule),
+        })
+        .map_infix(|lhs, op, rhs| {
+            let op = match op.as_rule() {
+                Rule::bool_and => BoolOp::And,
+                Rule::bool_or => BoolOp::Or,
+                rule => unreachable!("Expected bool op, found {:?}", rule),
+            };
+            LogicExpr::BoolOp {
+                lhs: Box::new(lhs),
+                op,
+                rhs: Box::new(rhs),
+            }
+        })
+        .parse(pairs)
 }
 
 impl fmt::Display for LogicExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "<logic expr>")
-    }
-}
-
-/// Part of a logical expression
-#[derive(Clone, Debug)]
-pub enum LogicExprPart {
-    Comparison {
-        lhs: ExprOrLiteral,
-        op: RelOp,
-        rhs: ExprOrLiteral,
-    },
-    Compound(Box<LogicExpr>),
-}
-
-impl fmt::Display for LogicExprPart {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "<logic part>")
-    }
-}
-
-/// Expression or string literal
-#[derive(Clone, Debug)]
-pub enum ExprOrLiteral {
-    Expr(Expr),
-    StringLiteral(String),
-}
-
-impl ExprOrLiteral {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
-        match entry.as_rule() {
-            Rule::expr => ExprOrLiteral::Expr(Expr::from_entry(entry)),
-            Rule::string_literal => ExprOrLiteral::StringLiteral(entry.as_str().to_string()),
-            _ => {
-                // For cases where we get the inner directly
-                if let Some(inner) = entry.into_inner().next() {
-                    ExprOrLiteral::from_entry(inner)
-                } else {
-                    ExprOrLiteral::StringLiteral(String::new())
-                }
-            }
-        }
-    }
-}
-
-impl fmt::Display for ExprOrLiteral {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ExprOrLiteral::Expr(e) => write!(f, "{}", e),
-            ExprOrLiteral::StringLiteral(s) => write!(f, "{}", s),
+            LogicExpr::Comparison { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
+            LogicExpr::BoolOp { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
         }
     }
 }
@@ -221,8 +177,8 @@ impl fmt::Display for ExprOrLiteral {
 #[derive(Clone, Debug)]
 pub struct Conditional {
     pub condition: LogicExpr,
-    pub then_expr: Box<ExprOrLiteral>,
-    pub else_expr: Option<Box<ExprOrLiteral>>,
+    pub then_expr: Box<Expr>,
+    pub else_expr: Option<Box<Expr>>,
 }
 
 impl Conditional {
@@ -239,24 +195,9 @@ impl Conditional {
                 Rule::logic_expr => condition = Some(LogicExpr::from_entry(pair.clone())),
                 Rule::expr => {
                     if then_expr.is_none() {
-                        then_expr = Some(Box::new(ExprOrLiteral::Expr(Expr::from_entry(
-                            pair.clone(),
-                        ))));
+                        then_expr = Some(Box::new(Expr::from_entry(pair.clone())));
                     } else {
-                        else_expr = Some(Box::new(ExprOrLiteral::Expr(Expr::from_entry(
-                            pair.clone(),
-                        ))));
-                    }
-                }
-                Rule::string_literal => {
-                    if then_expr.is_none() {
-                        then_expr = Some(Box::new(ExprOrLiteral::StringLiteral(
-                            pair.as_str().to_string(),
-                        )));
-                    } else {
-                        else_expr = Some(Box::new(ExprOrLiteral::StringLiteral(
-                            pair.as_str().to_string(),
-                        )));
+                        else_expr = Some(Box::new(Expr::from_entry(pair.clone())));
                     }
                 }
                 _ => {}

@@ -42,10 +42,11 @@ var_bounds = { rel_op ~ number }
 PARAM           =  { "param" ~ name ~ domain? ~ (","? ~ param_attrib)* ~ param_assign? ~ ";" }
 param_attrib    = _{ param_type | param_condition | param_in | param_default }
 param_type      =  { "integer" | "binary" | "symbolic" }
-param_condition =  { rel_op ~ expr_or_literal }
-param_in        =  { "in" ~ expr_or_literal }
-param_assign    =  { ":=" ~ expr_or_literal }
-param_default   =  { "default" ~ expr_or_literal }
+param_condition =  { rel_op ~ expr }
+param_in        =  { "in" ~ expr }
+param_assign    =  { ":=" ~ expr }
+// string_literal here is only used for output path
+param_default   =  { "default" ~ (expr | string_literal) }
 
 // Set
 // Example: set DAILYTIMEBRACKET;
@@ -106,7 +107,7 @@ set_index    = { id | index_int }
 
 // Data: Param
 DATA_PARAM          =  {
-    "param" ~ id ~ ("default" ~ param_data_default)? ~ ":="? ~ param_data_body ~ ";"
+    "param" ~ id ~ ("default" ~ param_data_default)? ~ ":="? ~ param_data_body? ~ ";"
 }
 param_data_default  = @{ number }
 param_data_body =      { param_data_scalar | param_data_matrix+ | param_data_list }
@@ -137,11 +138,13 @@ domain_set  = @{ id }
 
 // Logical expression
 // Expressions that evaluate to true or false
+// Uses Pratt parser for proper operator precedence (and > or)
 // Example: Demand[r] <> 0
-logic_expr          =  { logic_expr_type ~ (bool ~ logic_expr_type)* }
-logic_expr_type     = _{ logic_expr_part | logic_expr_compound }
-logic_expr_part     = _{ expr_or_literal ~ rel_op ~ expr_or_literal }
-logic_expr_compound =  { "(" ~ logic_expr ~ ")" }
+logic_expr     =  { logic_primary ~ (logic_infix ~ logic_primary)* }
+logic_primary  = _{ comparison | logic_compound }
+logic_infix    = _{ bool_and | bool_or }
+comparison     =  { expr ~ rel_op ~ expr }
+logic_compound =  { "(" ~ logic_expr ~ ")" }
 
 // Index
 var_subscripted =  { var_ref ~ subscript? }
@@ -156,7 +159,6 @@ index_shift     =  { ("+" | "-") ~ "1" }
 // Uses Pratt parser for proper operator precedence
 // Precedence (lowest to highest): conditional, add/sub, sum/prod, mul/div, neg, pow
 // Example: Rate[r] * Ratio[r]
-expr_or_literal = _{ expr | string_literal }
 expr            =  { prefix* ~ primary ~ (infix ~ prefix* ~ primary)* }
 prefix          = _{ neg | sum_prefix }
 neg             =  { "-" }
@@ -168,7 +170,7 @@ mul             =  { "*" }
 div             =  { "/" }
 pow             =  { "^" }
 primary         = _{ conditional | number | func | var_subscripted | "(" ~ expr ~ ")" }
-conditional     =  { "if" ~ logic_expr ~ "then" ~ expr_or_literal ~ ("else" ~ expr_or_literal)? }
+conditional     =  { "if" ~ logic_expr ~ "then" ~ expr ~ ("else" ~ expr)? }
 
 // Function
 // min/max have special syntax: min{domain} min(var)
@@ -178,8 +180,9 @@ func             = _{ func_min | func_max }
 func_min         =  { "min" ~ domain ~ "min" ~ "(" ~ func_var ~ ")" }
 func_max         =  { "max" ~ domain ~ "max" ~ "(" ~ func_var ~ ")" }
 func_var         = @{ id }
-bool                =  { "and" | "or" | "&&" | "||" }
-rel_op          =  { "<=" | "<>" | "<" | "==" | "=" | ">=" | ">" | "!=" }
+bool_and         =  { "and" | "&&" }
+bool_or          =  { "or" | "||" }
+rel_op           =  { "<=" | "<>" | "<" | "==" | "=" | ">=" | ">" | "!=" }
 
 // //////////////////////
 // GRAMMAR BASICS
