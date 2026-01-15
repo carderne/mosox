@@ -4,7 +4,7 @@ use pest::iterators::Pair;
 
 use crate::{
     gmpl::{
-        SetIndex,
+        IndexVal,
         expr::{Expr, LogicExpr},
     },
     grammar::Rule,
@@ -194,7 +194,7 @@ impl fmt::Display for BoolOp {
 pub struct VarSubscripted {
     pub var: String,
     pub subscript: Option<Subscript>,
-    pub concrete: Option<Vec<SetIndex>>,
+    pub concrete: Option<Vec<IndexVal>>,
 }
 
 impl VarSubscripted {

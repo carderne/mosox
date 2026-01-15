@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 // extern crate mptk;
 use mptk::model::ModelWithData;
 use mptk::mps::compile_mps;
+use mptk::mps::output::print_mps;
 use mptk::{load_data, load_model};
 
 #[derive(Parser)]
@@ -50,7 +51,8 @@ fn main() -> ExitCode {
         }
         Commands::Comp { path, data_path } => {
             let model = check(path, data_path, &false).unwrap();
-            compile_mps(model);
+            let compiled = compile_mps(model);
+            print_mps(compiled);
             set_exit()
         }
     }

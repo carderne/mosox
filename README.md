@@ -3,9 +3,9 @@
 ## Objectives:
 - [x] A grammar capable of parsing [GMPL](https://en.wikibooks.org/wiki/GLPK/GMPL_(MathProg)) .mod and .dat files
 - [x] Complete internal representation (IR) of parsed models and data
-- [ ] Collate model and data sections
-- [ ] Interpret functions, domains etc in the model 
-- [ ] Output to [MPS](https://en.wikipedia.org/wiki/MPS_(format))
+- [x] Collate model and data sections
+- [x] Interpret functions, domains etc in the model 
+- [z] Output to [MPS](https://en.wikipedia.org/wiki/MPS_(format))
 
 ## Quickstart
 Install
@@ -44,3 +44,25 @@ cargo make run
 - [Grammar](docs/GRAMMAR.md) - GMPL grammar specification and coverage
 - [Example IR](docs/EXAMPLE_IR.md) - Sample intermediate representation output
 - [Future Plan](docs/FUTURE_PLAN.md) - Development roadmap for Phases 2-3
+
+## Notes
+### Note on indexing
+
+There are three concepts in domain indexing.
+
+#### SET (generically, dimension)
+- type: String
+- Upper-case name for a dimension
+- `YEAR`
+- (The set directive supplies all the values)
+
+#### INDEX (set_index, con_index etc)
+- type: String
+- A single index is a single lower-case letter
+- `y`
+- That a var/param/constraint uses to index a given set/dimension
+
+#### VALUE
+- type: `IndexVal`
+- represents a single actual value in this set/dimension
+- `2014`

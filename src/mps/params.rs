@@ -1,0 +1,95 @@
+use std::collections::HashMap;
+
+use crate::gmpl::Expr;
+use crate::gmpl::{IndexVal, ParamDataBody, ParamDataTarget};
+use crate::model::ParamWithData;
+
+pub struct ParamCont {
+    pub data: ParamArr,
+    pub default: Option<Expr>,
+}
+pub enum ParamArr {
+    Arr(HashMap<Vec<IndexVal>, f64>),
+    Scalar(f64),
+    Expr(Expr),
+    None,
+}
+
+pub fn resolve_param(param: ParamWithData) -> ParamCont {
+    let default = resolve_param_default(&param);
+    if let Some(data) = param.data
+        && let Some(body) = data.body
+    {
+        match body {
+            ParamDataBody::Num(num) => ParamCont {
+                data: ParamArr::Scalar(num),
+                default,
+            },
+            ParamDataBody::List(pairs) => {
+                let mut arr: HashMap<Vec<IndexVal>, f64> = HashMap::new();
+                for pair in pairs {
+                    arr.insert(vec![pair.key], pair.value);
+                }
+                ParamCont {
+                    data: ParamArr::Arr(arr),
+                    default,
+                }
+            }
+            ParamDataBody::Tables(tables) => {
+                let mut arr: HashMap<Vec<IndexVal>, f64> = HashMap::new();
+                for table in tables {
+                    // Expressions like:
+                    // [Atlantis_00A,NGCC,NOx,*,*]:
+                    // Become prefixes for the indexes down below
+                    // NOTE: Current implementation ONLY supports having exactly two * (Any)
+                    // targets, and they must be the last two
+                    let target_idxs: Vec<IndexVal> = match table.target {
+                        Some(targets) => targets
+                            .iter()
+                            .filter_map(|t| match t {
+                                ParamDataTarget::IndexVar(idx) => Some(idx.clone()),
+                                ParamDataTarget::Any => None,
+                            })
+                            .collect(),
+                        None => vec![],
+                    };
+                    for row in table.rows {
+                        for (col, value) in table.cols.iter().zip(row.values.iter()) {
+                            arr.insert(
+                                [target_idxs.clone(), vec![row.label.clone(), col.clone()]]
+                                    .concat(),
+                                *value,
+                            );
+                        }
+                    }
+                }
+                ParamCont {
+                    data: ParamArr::Arr(arr),
+                    default,
+                }
+            }
+        }
+    } else if let Some(expr) = param.decl.assign {
+        ParamCont {
+            data: ParamArr::Expr(expr),
+            default,
+        }
+    } else {
+        ParamCont {
+            data: ParamArr::None,
+            default,
+        }
+    }
+}
+
+fn resolve_param_default(param: &ParamWithData) -> Option<Expr> {
+    if let Some(data) = &param.data {
+        if let Some(default) = data.default {
+            return Some(Expr::Number(default));
+        };
+    } else if let Some(default) = &param.decl.default {
+        return Some(default.clone());
+    };
+
+    None
+}

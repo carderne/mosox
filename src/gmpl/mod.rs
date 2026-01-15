@@ -251,7 +251,7 @@ impl fmt::Display for Constraint {
 #[derive(Clone, Debug)]
 pub struct DataSet {
     pub name: String,
-    pub values: Vec<SetIndex>,
+    pub values: Vec<IndexVal>,
 }
 
 impl DataSet {
@@ -262,7 +262,7 @@ impl DataSet {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::name => name = pair.as_str().to_string(),
-                Rule::set_index => values.push(SetIndex::from_entry(pair)),
+                Rule::index_val => values.push(IndexVal::from_entry(pair)),
                 _ => {}
             }
         }
@@ -285,7 +285,7 @@ impl fmt::Display for DataSet {
 /// Data parameter values
 #[derive(Clone, Debug)]
 pub struct ParamDataPair {
-    pub key: SetIndex,
+    pub key: IndexVal,
     pub value: f64,
 }
 
@@ -295,8 +295,8 @@ impl ParamDataPair {
         let key = tokens.next().unwrap().as_str();
         let key = key
             .parse::<u64>()
-            .map(SetIndex::Int)
-            .unwrap_or_else(|_| SetIndex::Str(key.to_string()));
+            .map(IndexVal::Int)
+            .unwrap_or_else(|_| IndexVal::Str(key.to_string()));
         let value = tokens.next().unwrap().as_str().parse().unwrap();
         Self { key, value }
     }
@@ -526,44 +526,44 @@ impl fmt::Display for ParamCondition {
 
 /// Set index (identifier or positive integer)
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
-pub enum SetIndex {
+pub enum IndexVal {
     Str(String),
     Int(u64),
 }
 
-impl SetIndex {
+impl IndexVal {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
         let inner = entry.into_inner().next().unwrap();
         match inner.as_rule() {
-            Rule::id => SetIndex::Str(inner.as_str().to_string()),
-            Rule::index_int => SetIndex::Int(inner.as_str().parse().unwrap_or(0)),
-            _ => SetIndex::Str(inner.as_str().to_string()),
+            Rule::id => IndexVal::Str(inner.as_str().to_string()),
+            Rule::index_int => IndexVal::Int(inner.as_str().parse().unwrap_or(0)),
+            _ => IndexVal::Str(inner.as_str().to_string()),
         }
     }
 }
 
-impl Ord for SetIndex {
+impl Ord for IndexVal {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self, other) {
-            (SetIndex::Int(a), SetIndex::Int(b)) => a.cmp(b),
-            (SetIndex::Str(a), SetIndex::Str(b)) => a.cmp(b),
-            (SetIndex::Int(_), SetIndex::Str(_)) => std::cmp::Ordering::Less,
-            (SetIndex::Str(_), SetIndex::Int(_)) => std::cmp::Ordering::Greater,
+            (IndexVal::Int(a), IndexVal::Int(b)) => a.cmp(b),
+            (IndexVal::Str(a), IndexVal::Str(b)) => a.cmp(b),
+            (IndexVal::Int(_), IndexVal::Str(_)) => std::cmp::Ordering::Less,
+            (IndexVal::Str(_), IndexVal::Int(_)) => std::cmp::Ordering::Greater,
         }
     }
 }
 
-impl PartialOrd for SetIndex {
+impl PartialOrd for IndexVal {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl fmt::Display for SetIndex {
+impl fmt::Display for IndexVal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            SetIndex::Str(s) => write!(f, "{}", s),
-            SetIndex::Int(n) => write!(f, "{}", n),
+            IndexVal::Str(s) => write!(f, "{}", s),
+            IndexVal::Int(n) => write!(f, "{}", n),
         }
     }
 }
@@ -572,14 +572,14 @@ impl fmt::Display for SetIndex {
 #[derive(Clone, Debug)]
 pub struct ParamDataTable {
     pub target: Option<Vec<ParamDataTarget>>,
-    pub cols: Vec<SetIndex>,
+    pub cols: Vec<IndexVal>,
     pub rows: Vec<ParamDataRow>,
 }
 
 impl ParamDataTable {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
         let mut target = None;
-        let mut cols: Vec<SetIndex> = Vec::new();
+        let mut cols: Vec<IndexVal> = Vec::new();
         let mut rows = Vec::new();
 
         for pair in entry.into_inner() {
@@ -592,8 +592,8 @@ impl ParamDataTable {
                                 let raw = inner.as_str();
                                 let idx = raw
                                     .parse::<u64>()
-                                    .map(SetIndex::Int)
-                                    .unwrap_or_else(|_| SetIndex::Str(raw.to_string()));
+                                    .map(IndexVal::Int)
+                                    .unwrap_or_else(|_| IndexVal::Str(raw.to_string()));
 
                                 targets.push(ParamDataTarget::IndexVar(idx))
                             }
@@ -605,12 +605,12 @@ impl ParamDataTable {
                 }
                 Rule::param_data_cols => {
                     for inner in pair.into_inner() {
-                        if inner.as_rule() == Rule::set_index {
+                        if inner.as_rule() == Rule::index_val {
                             let raw = inner.as_str();
                             let col = raw
                                 .parse::<u64>()
-                                .map(SetIndex::Int)
-                                .unwrap_or_else(|_| SetIndex::Str(raw.to_string()));
+                                .map(IndexVal::Int)
+                                .unwrap_or_else(|_| IndexVal::Str(raw.to_string()));
                             cols.push(col);
                         }
                     }
@@ -636,7 +636,7 @@ impl fmt::Display for ParamDataTable {
 /// Parameter data target
 #[derive(Clone, Debug)]
 pub enum ParamDataTarget {
-    IndexVar(SetIndex),
+    IndexVar(IndexVal),
     Any,
 }
 
@@ -652,24 +652,24 @@ impl fmt::Display for ParamDataTarget {
 /// Parameter data row
 #[derive(Clone, Debug)]
 pub struct ParamDataRow {
-    pub label: SetIndex,
+    pub label: IndexVal,
     pub values: Vec<f64>,
 }
 
 impl ParamDataRow {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
-        let mut label: Option<SetIndex> = None;
+        let mut label: Option<IndexVal> = None;
         let mut values = Vec::new();
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::set_index => {
+                Rule::index_val => {
                     if label.is_none() {
                         let raw = pair.as_str();
                         label = Some(
                             raw.parse::<u64>()
-                                .map(SetIndex::Int)
-                                .unwrap_or_else(|_| SetIndex::Str(raw.to_string())),
+                                .map(IndexVal::Int)
+                                .unwrap_or_else(|_| IndexVal::Str(raw.to_string())),
                         );
                     }
                 }
