@@ -1,4 +1,5 @@
 use std::process::ExitCode;
+use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 
@@ -50,9 +51,21 @@ fn main() -> ExitCode {
             set_exit()
         }
         Commands::Comp { path, data_path } => {
+            let t_total = Instant::now();
+
+            let t0 = Instant::now();
             let model = check(path, data_path, &false).unwrap();
+            eprintln!("load: {:?}", t0.elapsed());
+
+            let t1 = Instant::now();
             let compiled = compile_mps(model);
+            eprintln!("compile: {:?}", t1.elapsed());
+
+            let t2 = Instant::now();
             print_mps(compiled);
+            eprintln!("print: {:?}", t2.elapsed());
+
+            eprintln!("total: {:?}", t_total.elapsed());
             set_exit()
         }
     }

@@ -8,11 +8,6 @@ use crate::mps::lookups::Lookups;
 use crate::mps::params::ParamArr;
 use itertools::Itertools;
 
-pub struct BuiltConstraint {
-    pub rhs: Option<f64>,
-    pub pairs: Vec<Pair>,
-}
-
 #[derive(Clone, Debug)]
 pub struct Pair {
     pub var: String,
@@ -28,21 +23,6 @@ pub enum Term {
 
 //                       index   index value
 type IdxValMap = HashMap<String, IndexVal>;
-
-pub fn build_constraint(
-    constraint: &Constraint,
-    lookups: &Lookups,
-    idx_val_map: &IdxValMap,
-) -> BuiltConstraint {
-    let lhs = recurse(constraint.constraint_expr.lhs.clone(), lookups, idx_val_map);
-    let rhs = recurse(constraint.constraint_expr.rhs.clone(), lookups, idx_val_map);
-
-    let (pairs, rhs_total) = algebra(lhs, rhs);
-    BuiltConstraint {
-        rhs: Some(rhs_total),
-        pairs,
-    }
-}
 
 pub fn recurse(expr: Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Term> {
     match expr.clone() {
@@ -494,7 +474,7 @@ fn resolve_terms_to_num(terms: Vec<Term>) -> Option<f64> {
     })
 }
 
-fn algebra(lhs: Vec<Term>, rhs: Vec<Term>) -> (Vec<Pair>, f64) {
+pub fn algebra(lhs: Vec<Term>, rhs: Vec<Term>) -> (Vec<Pair>, f64) {
     let lhs_nums: Vec<f64> = lhs
         .clone()
         .into_iter()

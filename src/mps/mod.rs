@@ -5,6 +5,7 @@ pub mod output;
 mod params;
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use indexmap::IndexMap;
 
@@ -12,7 +13,7 @@ use crate::gmpl::IndexVal;
 use crate::model::ModelWithData;
 use crate::mps::bounds::{MpsBounds, gen_bounds};
 use crate::mps::constraints::{
-    RowType, Term, build_constraint, domain_to_indexes, get_idx_val_map, recurse,
+    RowType, Term, algebra, domain_to_indexes, get_idx_val_map, recurse,
 };
 use crate::mps::lookups::Lookups;
 
@@ -59,21 +60,36 @@ fn build_constraints(model: &ModelWithData, lookups: &Lookups) -> (Cols, Rows) {
     }
 
     // Then all the actual constraints
+    let mut constraint_times: Vec<(&str, Duration)> = Vec::new();
+
     for constraint in &model.constraints {
-        dbg!(&constraint.name);
+        let tc = Instant::now();
+
         let con_indexes = domain_to_indexes(&constraint.domain, lookups, &HashMap::new());
 
         for con_index in con_indexes {
             let dir = RowType::from_rel_op(&constraint.constraint_expr.op);
             let idx_val_map = get_idx_val_map(constraint, &con_index);
-            let built = build_constraint(constraint, lookups, &idx_val_map);
+
+            let lhs = recurse(
+                constraint.constraint_expr.lhs.clone(),
+                lookups,
+                &idx_val_map,
+            );
+            let rhs = recurse(
+                constraint.constraint_expr.rhs.clone(),
+                lookups,
+                &idx_val_map,
+            );
+
+            let (pairs, rhs_total) = algebra(lhs, rhs);
 
             rows.insert(
                 (constraint.name.clone(), con_index.clone()),
-                (dir, built.rhs),
+                (dir, Some(rhs_total)),
             );
 
-            for pair in &built.pairs {
+            for pair in &pairs {
                 cols.entry((
                     pair.var.clone(),
                     pair.index.clone().unwrap_or_else(Vec::new),
@@ -82,6 +98,15 @@ fn build_constraints(model: &ModelWithData, lookups: &Lookups) -> (Cols, Rows) {
                 .insert((constraint.name.clone(), con_index.clone()), pair.coeff);
             }
         }
+
+        constraint_times.push((&constraint.name, tc.elapsed()));
+    }
+
+    // Print timing summary
+    constraint_times.sort_by(|a, b| b.1.cmp(&a.1));
+    eprintln!("Top constraints by time:");
+    for (name, dur) in constraint_times.iter().take(10) {
+        eprintln!("  {}: {:?}", name, dur);
     }
 
     (cols, rows)
