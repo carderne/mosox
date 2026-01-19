@@ -11,6 +11,7 @@ mod grammar;
 pub mod loader;
 pub mod model;
 pub mod mps;
+pub mod util;
 
 /// Loads the GMPL model file at `path` into an internal representation
 pub fn load_model(path: &str) -> Vec<Entry> {

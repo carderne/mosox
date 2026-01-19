@@ -3,38 +3,32 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 
 use crate::{
-    gmpl::IndexVal,
-    model::ModelWithData,
+    gmpl::{IndexVal, Var},
+    model::{ParamWithData, SetWithData},
     mps::{
-        bounds::MpsBounds,
+        bounds::Bounds,
         params::{ParamCont, resolve_param},
     },
 };
 
 pub struct Lookups {
     pub set_map: IndexMap<String, Vec<IndexVal>>,
-    pub var_map: HashMap<String, MpsBounds>,
+    pub var_map: HashMap<String, Bounds>,
     pub par_map: HashMap<String, ParamCont>,
 }
 
 impl Lookups {
-    pub fn from_model(model: &ModelWithData) -> Self {
+    pub fn from_model(sets: Vec<SetWithData>, vars: Vec<Var>, pars: Vec<ParamWithData>) -> Self {
         Lookups {
-            set_map: model
-                .sets
-                .clone()
+            set_map: sets
                 .into_iter()
                 .map(|set| (set.decl.name, set.data.unwrap().values))
                 .collect(),
-            var_map: model
-                .vars
-                .clone()
+            var_map: vars
                 .into_iter()
-                .map(|var| (var.name, MpsBounds::from_gmpl_bounds(var.bounds)))
+                .map(|var| (var.name, Bounds::from_gmpl_bounds(var.bounds)))
                 .collect(),
-            par_map: model
-                .params
-                .clone()
+            par_map: pars
                 .into_iter()
                 .map(|param| (param.decl.name.clone(), resolve_param(param)))
                 .collect(),

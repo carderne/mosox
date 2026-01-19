@@ -9,97 +9,93 @@ use std::time::{Duration, Instant};
 
 use indexmap::IndexMap;
 
-use crate::gmpl::IndexVal;
+use crate::gmpl::{Constraint, IndexVal, Objective};
 use crate::model::ModelWithData;
-use crate::mps::bounds::{MpsBounds, gen_bounds};
+use crate::mps::bounds::{Bounds, gen_bounds};
 use crate::mps::constraints::{
     RowType, Term, algebra, domain_to_indexes, get_idx_val_map, recurse,
 };
 use crate::mps::lookups::Lookups;
 
 //                    var     var_index                 con     con_index       val
-type Cols = IndexMap<(String, Vec<IndexVal>), IndexMap<(String, Vec<IndexVal>), f64>>;
+type ColsMap = IndexMap<(String, Vec<IndexVal>), IndexMap<(String, Vec<IndexVal>), f64>>;
 //                      con     con_index        type     rhs
-type Rows = IndexMap<(String, Vec<IndexVal>), (RowType, Option<f64>)>;
+type RowsMap = IndexMap<(String, Vec<IndexVal>), (RowType, Option<f64>)>;
 //                      var     var_index       bounds
-type Bounds = IndexMap<(String, Vec<IndexVal>), MpsBounds>;
+type BoundsMap = IndexMap<(String, Vec<IndexVal>), Bounds>;
 
 pub struct Compiled {
-    cols: Cols,
-    rows: Rows,
-    bounds: Bounds,
+    cols: ColsMap,
+    rows: RowsMap,
+    bounds: BoundsMap,
 }
 
 pub fn compile_mps(model: ModelWithData) -> Compiled {
-    let lookups = Lookups::from_model(&model);
-    let (cols, rows) = build_constraints(&model, &lookups);
+    let ModelWithData {
+        sets,
+        pars,
+        vars,
+        objective,
+        constraints,
+    } = model;
+
+    let lookups = Lookups::from_model(sets, vars, pars);
+    let (cols, rows) = build_constraints(objective, constraints, &lookups);
     let bounds = gen_bounds(&cols, &lookups);
     Compiled { cols, rows, bounds }
 }
 
-fn build_constraints(model: &ModelWithData, lookups: &Lookups) -> (Cols, Rows) {
-    let mut rows: Rows = IndexMap::new();
-    let mut cols: Cols = IndexMap::new();
+fn build_constraints(
+    objective: Objective,
+    constraints: Vec<Constraint>,
+    lookups: &Lookups,
+) -> (ColsMap, RowsMap) {
+    let mut rows: RowsMap = IndexMap::new();
+    let mut cols: ColsMap = IndexMap::new();
 
     // First the objective alone
     // Objective is always "singular": it has no domain
-    rows.insert((model.objective.name.clone(), vec![]), (RowType::N, None));
-    let pairs = recurse(model.objective.expr.clone(), lookups, &HashMap::new());
-    for pair in &pairs {
+    rows.insert((objective.name.clone(), vec![]), (RowType::N, None));
+    let pairs = recurse(&objective.expr, lookups, &HashMap::new());
+    for pair in pairs {
         match pair {
             Term::Num(_) => panic!("unhandled: objective function has a const in it"),
             Term::Pair(pair) => {
-                cols.entry((
-                    pair.var.clone(),
-                    pair.index.clone().unwrap_or_else(Vec::new),
-                ))
-                .or_default()
-                .insert((model.objective.name.clone(), vec![]), pair.coeff);
+                cols.entry((pair.var, pair.index.unwrap_or_else(Vec::new)))
+                    .or_default()
+                    .insert((objective.name.clone(), vec![]), pair.coeff);
             }
         }
     }
 
     // Then all the actual constraints
-    let mut constraint_times: Vec<(&str, Duration)> = Vec::new();
-
-    for constraint in &model.constraints {
+    let mut constraint_times: Vec<(String, Duration)> = Vec::new();
+    for constraint in constraints {
         let tc = Instant::now();
 
-        let con_indexes = domain_to_indexes(&constraint.domain, lookups, &HashMap::new());
+        let Constraint { name, domain, expr } = constraint;
+
+        let con_indexes = domain_to_indexes(domain.as_ref(), lookups, None);
 
         for con_index in con_indexes {
-            let dir = RowType::from_rel_op(&constraint.constraint_expr.op);
-            let idx_val_map = get_idx_val_map(constraint, &con_index);
+            let dir = RowType::from_rel_op(&expr.op);
+            let idx_val_map = get_idx_val_map(&domain, &con_index);
 
-            let lhs = recurse(
-                constraint.constraint_expr.lhs.clone(),
-                lookups,
-                &idx_val_map,
-            );
-            let rhs = recurse(
-                constraint.constraint_expr.rhs.clone(),
-                lookups,
-                &idx_val_map,
-            );
+            let lhs = recurse(&expr.lhs, lookups, &idx_val_map);
+            let rhs = recurse(&expr.rhs, lookups, &idx_val_map);
 
             let (pairs, rhs_total) = algebra(lhs, rhs);
 
-            rows.insert(
-                (constraint.name.clone(), con_index.clone()),
-                (dir, Some(rhs_total)),
-            );
+            rows.insert((name.clone(), con_index.clone()), (dir, Some(rhs_total)));
 
-            for pair in &pairs {
-                cols.entry((
-                    pair.var.clone(),
-                    pair.index.clone().unwrap_or_else(Vec::new),
-                ))
-                .or_default()
-                .insert((constraint.name.clone(), con_index.clone()), pair.coeff);
+            for pair in pairs {
+                cols.entry((pair.var, pair.index.unwrap_or_else(Vec::new)))
+                    .or_default()
+                    .insert((name.clone(), con_index.clone()), pair.coeff);
             }
         }
 
-        constraint_times.push((&constraint.name, tc.elapsed()));
+        constraint_times.push((name.clone(), tc.elapsed()));
     }
 
     // Print timing summary

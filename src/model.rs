@@ -37,13 +37,12 @@ impl fmt::Display for ParamWithData {
     }
 }
 
-/// Complete model with sorted and matched declarations
 #[derive(Clone, Debug)]
 pub struct ModelWithData {
-    pub objective: Objective,
     pub sets: Vec<SetWithData>,
-    pub params: Vec<ParamWithData>,
     pub vars: Vec<Var>,
+    pub pars: Vec<ParamWithData>,
+    pub objective: Objective,
     pub constraints: Vec<Constraint>,
 }
 
@@ -55,7 +54,7 @@ impl fmt::Display for ModelWithData {
             writeln!(f, "{}", set)?;
         }
 
-        for param in &self.params {
+        for param in &self.pars {
             writeln!(f, "{}", param)?;
         }
 
@@ -73,7 +72,7 @@ impl fmt::Display for ModelWithData {
 
 impl ModelWithData {
     /// Build a ModelWithData from a list of entries, matching data to model statements
-    pub fn from_entries(entries: &[Entry]) -> Result<Self, String> {
+    pub fn from_entries(entries: Vec<Entry>) -> Self {
         let mut objective = None;
         let mut sets = Vec::new();
         let mut params = Vec::new();
@@ -87,16 +86,16 @@ impl ModelWithData {
             match entry {
                 Entry::Objective(obj) => {
                     if objective.is_some() {
-                        return Err("Multiple objectives found".to_string());
+                        panic!("Multiple objectives found");
                     }
-                    objective = Some(obj.clone());
+                    objective = Some(obj);
                 }
-                Entry::Set(set) => sets.push(set.clone()),
-                Entry::Param(param) => params.push(param.clone()),
-                Entry::Var(var) => vars.push(var.clone()),
-                Entry::Constraint(constraint) => constraints.push(constraint.clone()),
-                Entry::DataSet(data_set) => data_sets.push(data_set.clone()),
-                Entry::DataParam(data_param) => data_params.push(data_param.clone()),
+                Entry::Set(set) => sets.push(set),
+                Entry::Param(param) => params.push(param),
+                Entry::Var(var) => vars.push(var),
+                Entry::Constraint(constraint) => constraints.push(constraint),
+                Entry::DataSet(data_set) => data_sets.push(data_set),
+                Entry::DataParam(data_param) => data_params.push(data_param),
             }
         }
 
@@ -120,10 +119,10 @@ impl ModelWithData {
                     data: Some(data_set),
                 });
             } else {
-                return Err(format!(
+                panic!(
                     "Data set '{}' has no matching model declaration",
                     data_set.name
-                ));
+                );
             }
         }
 
@@ -134,7 +133,6 @@ impl ModelWithData {
                 data: None,
             });
         }
-        matched_sets.sort_by(|a, b| a.decl.name.cmp(&b.decl.name));
 
         // Match data params to model params
         let mut matched_params = Vec::new();
@@ -145,10 +143,10 @@ impl ModelWithData {
                     data: Some(data_param),
                 });
             } else {
-                return Err(format!(
+                panic!(
                     "Data param '{}' has no matching model declaration",
                     data_param.name
-                ));
+                );
             }
         }
 
@@ -159,14 +157,13 @@ impl ModelWithData {
                 data: None,
             });
         }
-        matched_params.sort_by(|a, b| a.decl.name.cmp(&b.decl.name));
 
-        Ok(ModelWithData {
+        ModelWithData {
             objective: objective.unwrap(),
             sets: matched_sets,
-            params: matched_params,
+            pars: matched_params,
             vars,
             constraints,
-        })
+        }
     }
 }

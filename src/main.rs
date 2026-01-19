@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 use mptk::model::ModelWithData;
 use mptk::mps::compile_mps;
 use mptk::mps::output::print_mps;
+use mptk::util::stem;
 use mptk::{load_data, load_model};
 
 #[derive(Parser)]
@@ -62,7 +63,7 @@ fn main() -> ExitCode {
             eprintln!("compile: {:?}", t1.elapsed());
 
             let t2 = Instant::now();
-            print_mps(compiled);
+            print_mps(compiled, stem(path));
             eprintln!("print: {:?}", t2.elapsed());
 
             eprintln!("total: {:?}", t_total.elapsed());
@@ -85,13 +86,7 @@ fn check(
     let entries = [&model_entries[..], &data_entries[..]].concat();
 
     // Build the model with matched data
-    let model = match ModelWithData::from_entries(&entries) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            return Err(ExitCode::FAILURE);
-        }
-    };
+    let model = ModelWithData::from_entries(entries);
 
     // Print the model
     if *verbose {

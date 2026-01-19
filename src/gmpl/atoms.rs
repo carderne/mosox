@@ -85,7 +85,7 @@ impl fmt::Display for DomainPart {
 // ==============================
 
 /// Relational operator
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum RelOp {
     Lt,
     Le,
@@ -129,7 +129,7 @@ impl fmt::Display for RelOp {
 }
 
 /// Mathematical operator
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum MathOp {
     Add,
     Sub,
@@ -354,11 +354,9 @@ impl FuncMin {
                 _ => {}
             }
         }
+        let domain = domain.unwrap();
 
-        Self {
-            domain: domain.unwrap(),
-            var,
-        }
+        Self { domain, var }
     }
 }
 
@@ -387,11 +385,9 @@ impl FuncMax {
                 _ => {}
             }
         }
+        let domain = domain.unwrap();
 
-        Self {
-            domain: domain.unwrap(),
-            var,
-        }
+        Self { domain, var }
     }
 }
 

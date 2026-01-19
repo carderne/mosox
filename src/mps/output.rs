@@ -1,10 +1,10 @@
 use crate::{
     gmpl::IndexVal,
-    mps::{Bounds, Cols, Compiled, Rows, bounds::BoundsOp},
+    mps::{BoundsMap, ColsMap, Compiled, RowsMap, bounds::BoundsOp},
 };
 
-pub fn print_mps(compiled: Compiled) {
-    println!("NAME          noname");
+pub fn print_mps(compiled: Compiled, model_name: &str) {
+    println!("NAME {model_name}");
     print_rows(&compiled.rows);
     print_cols(compiled.cols);
     print_rhs(&compiled.rows);
@@ -12,7 +12,7 @@ pub fn print_mps(compiled: Compiled) {
     println!("ENDATA");
 }
 
-fn print_rows(rows: &Rows) {
+fn print_rows(rows: &RowsMap) {
     println!("ROWS");
     for ((name, idx), (dir, _)) in rows {
         let idx = format_index_vals(idx);
@@ -20,23 +20,20 @@ fn print_rows(rows: &Rows) {
     }
 }
 
-fn print_cols(cols: Cols) {
+fn print_cols(cols: ColsMap) {
     println!("COLUMNS");
     for ((var_name, var_index), con_map) in cols {
         for ((con_name, con_index), val) in con_map {
             if val != 0.0 {
                 let var_idx = format_index_vals(&var_index);
                 let con_idx = format_index_vals(&con_index);
-                println!(
-                    "    {}{}      {}{}         {}",
-                    var_name, var_idx, con_name, con_idx, val
-                );
+                println!(" {}{} {}{} {}", var_name, var_idx, con_name, con_idx, val);
             }
         }
     }
 }
 
-fn print_rhs(rows: &Rows) {
+fn print_rhs(rows: &RowsMap) {
     println!("RHS");
     for ((name, idx), (_, val)) in rows {
         // MPS format assumes RHS is 0 if not provided
@@ -45,12 +42,12 @@ fn print_rhs(rows: &Rows) {
             && *num != 0.0
         {
             let idx = format_index_vals(idx);
-            println!("    RHS1      {name}{idx}       {num}");
+            println!(" RHS1 {name}{idx} {num}");
         }
     }
 }
 
-fn print_bounds(bounds: Bounds) {
+fn print_bounds(bounds: BoundsMap) {
     println!("BOUNDS");
 
     for ((var_name, var_idx), bounds) in bounds {
@@ -65,7 +62,7 @@ fn print_bounds(bounds: Bounds) {
         };
 
         println!(
-            " {} BND1     {}{}         {}",
+            " {} BND1 {}{} {}",
             bounds.op,
             var_name,
             format_index_vals(&var_idx),

@@ -1,11 +1,11 @@
 use std::fmt;
 
 use crate::{
-    gmpl::{VarBounds, atoms::RelOp},
-    mps::{Bounds, Cols, lookups::Lookups},
+    gmpl,
+    mps::{BoundsMap, ColsMap, lookups::Lookups},
 };
 
-pub fn gen_bounds(cols: &Cols, lookups: &Lookups) -> Bounds {
+pub fn gen_bounds(cols: &ColsMap, lookups: &Lookups) -> BoundsMap {
     cols.into_iter()
         .map(|((var_name, var_idx), _)| {
             (
@@ -17,19 +17,19 @@ pub fn gen_bounds(cols: &Cols, lookups: &Lookups) -> Bounds {
 }
 
 #[derive(Clone, Debug)]
-pub struct MpsBounds {
+pub struct Bounds {
     pub op: BoundsOp,
     pub val: Option<f64>,
 }
 
-impl MpsBounds {
-    pub fn from_gmpl_bounds(bounds: Option<VarBounds>) -> Self {
+impl Bounds {
+    pub fn from_gmpl_bounds(bounds: Option<gmpl::VarBounds>) -> Self {
         match bounds {
-            Some(bounds) => MpsBounds {
+            Some(bounds) => Bounds {
                 op: BoundsOp::from_rel_op(&bounds.op),
                 val: Some(bounds.value),
             },
-            None => MpsBounds {
+            None => Bounds {
                 op: BoundsOp::FR,
                 val: None,
             },
@@ -46,16 +46,16 @@ pub enum BoundsOp {
 }
 
 impl BoundsOp {
-    pub fn from_rel_op(op: &RelOp) -> Self {
+    pub fn from_rel_op(op: &gmpl::RelOp) -> Self {
         match op {
-            RelOp::Lt => panic!("Less than not supported"),
-            RelOp::Le => BoundsOp::UP,
-            RelOp::Eq => BoundsOp::FX,
-            RelOp::EqEq => BoundsOp::FX,
-            RelOp::Ne => panic!("Not equal not supported"),
-            RelOp::Ne2 => panic!("Not equal not supported"),
-            RelOp::Ge => BoundsOp::LO,
-            RelOp::Gt => panic!("Greater than not supported"),
+            gmpl::RelOp::Lt => panic!("Less than not supported"),
+            gmpl::RelOp::Le => BoundsOp::UP,
+            gmpl::RelOp::Eq => BoundsOp::FX,
+            gmpl::RelOp::EqEq => BoundsOp::FX,
+            gmpl::RelOp::Ne => panic!("Not equal not supported"),
+            gmpl::RelOp::Ne2 => panic!("Not equal not supported"),
+            gmpl::RelOp::Ge => BoundsOp::LO,
+            gmpl::RelOp::Gt => panic!("Greater than not supported"),
         }
     }
 }

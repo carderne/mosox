@@ -1,15 +1,13 @@
 pub mod atoms;
 mod expr;
 
-pub use expr::{Expr, LogicExpr};
-
 use std::fmt;
 
-use crate::{
-    gmpl::atoms::{Domain, RelOp},
-    grammar::Rule,
-};
 use pest::iterators::Pair;
+
+use crate::grammar::Rule;
+pub use atoms::{Domain, RelOp};
+pub use expr::{Expr, LogicExpr};
 
 // ==============================
 // ROOT RULES
@@ -211,7 +209,7 @@ impl fmt::Display for Objective {
 pub struct Constraint {
     pub name: String,
     pub domain: Option<Domain>,
-    pub constraint_expr: ConstraintExpr,
+    pub expr: ConstraintExpr,
 }
 
 impl Constraint {
@@ -232,7 +230,7 @@ impl Constraint {
         Self {
             name,
             domain,
-            constraint_expr: constraint_expr.unwrap(),
+            expr: constraint_expr.unwrap(),
         }
     }
 }
@@ -243,7 +241,7 @@ impl fmt::Display for Constraint {
         if self.domain.is_some() {
             write!(f, " <domain>")?;
         }
-        write!(f, ": {}", self.constraint_expr)
+        write!(f, ": {}", self.expr)
     }
 }
 
@@ -462,7 +460,7 @@ impl fmt::Display for ObjSense {
 }
 
 /// Variable bounds
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct VarBounds {
     pub op: RelOp,
     pub value: f64,

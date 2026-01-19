@@ -45,9 +45,9 @@ pub fn resolve_param(param: ParamWithData) -> ParamCont {
                     // targets, and they must be the last two
                     let target_idxs: Vec<IndexVal> = match table.target {
                         Some(targets) => targets
-                            .iter()
+                            .into_iter()
                             .filter_map(|t| match t {
-                                ParamDataTarget::IndexVar(idx) => Some(idx.clone()),
+                                ParamDataTarget::IndexVar(idx) => Some(idx),
                                 ParamDataTarget::Any => None,
                             })
                             .collect(),

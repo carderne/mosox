@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::gmpl::atoms::{BoolOp, Domain, IndexShift, RelOp, VarSubscripted};
-use crate::gmpl::{Constraint, Expr, atoms::MathOp};
+use crate::gmpl::{Expr, atoms::MathOp};
 use crate::gmpl::{IndexVal, LogicExpr};
 use crate::mps::lookups::Lookups;
 use crate::mps::params::ParamArr;
@@ -24,15 +24,15 @@ pub enum Term {
 //                       index   index value
 type IdxValMap = HashMap<String, IndexVal>;
 
-pub fn recurse(expr: Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Term> {
-    match expr.clone() {
-        Expr::Number(num) => vec![Term::Num(num)],
+pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Term> {
+    match expr {
+        Expr::Number(num) => vec![Term::Num(*num)],
         Expr::VarSubscripted(var_or_param) => {
-            let name = var_or_param.var.clone();
+            let name = &var_or_param.var;
 
-            let concrete: Option<Vec<IndexVal>> = if let Some(c) = var_or_param.concrete {
+            let concrete: Option<Vec<IndexVal>> = if let Some(c) = &var_or_param.concrete {
                 // Already resolved by sum expansion
-                Some(c)
+                Some(c.clone())
             } else {
                 var_or_param.subscript.as_ref().map(|subscript| {
                     subscript
@@ -57,13 +57,13 @@ pub fn recurse(expr: Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Te
                 })
             };
 
-            if lookups.var_map.contains_key(&name) {
+            if lookups.var_map.contains_key(name) {
                 vec![Term::Pair(Pair {
                     coeff: 1.0,
                     index: concrete,
-                    var: name,
+                    var: name.clone(),
                 })]
-            } else if let Some(param) = lookups.par_map.get(&name) {
+            } else if let Some(param) = lookups.par_map.get(name) {
                 match &param.data {
                     ParamArr::Scalar(num) => vec![Term::Num(*num)],
                     ParamArr::Arr(arr) => {
@@ -72,21 +72,21 @@ pub fn recurse(expr: Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Te
                             vec![Term::Num(*arr_val)]
                         } else {
                             match &param.default {
-                                Some(expr) => recurse(expr.clone(), lookups, idx_val_map),
+                                Some(expr) => recurse(expr, lookups, idx_val_map),
                                 None => panic!("tried to get uninitialized param: {}", &name),
                             }
                         }
                     }
                     ParamArr::Expr(expr) => {
-                        let res = recurse(expr.clone(), lookups, idx_val_map);
+                        let res = recurse(expr, lookups, idx_val_map);
                         res
                     }
                     ParamArr::None => match &param.default {
-                        Some(expr) => recurse(expr.clone(), lookups, idx_val_map),
-                        None => panic!("tried to get uninitialized param: {}", &name),
+                        Some(expr) => recurse(expr, lookups, idx_val_map),
+                        None => panic!("tried to get uninitialized param: {}", name),
                     },
                 }
-            } else if let Some(index_val) = idx_val_map.get(&name) {
+            } else if let Some(index_val) = idx_val_map.get(name) {
                 // Use the current index value (eg y=>2014) as an actual value
                 // Mostly (only?) used in domain condition expressions
                 match index_val {
@@ -101,11 +101,8 @@ pub fn recurse(expr: Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Te
             }
         }
         Expr::FuncSum(func) => {
-            let domain = func.domain;
-            let operand = *func.operand;
-
-            let new_expr = expand_sum(&operand, &domain, lookups, idx_val_map);
-            recurse(new_expr, lookups, idx_val_map)
+            let new_expr = expand_sum(&func.operand, &func.domain, lookups, idx_val_map);
+            recurse(&new_expr, lookups, idx_val_map)
         }
         Expr::FuncMin(func) => {
             // FuncMin looks like this:
@@ -113,12 +110,11 @@ pub fn recurse(expr: Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Te
             // Assumptions:
             // - always only one dimension
             // - always just getting the min of that set
-            let set_name = func.domain.parts.first().cloned();
-            match set_name {
-                Some(set_name) => {
+            match func.domain.parts.first() {
+                Some(set_domain) => {
                     let min_val = lookups
                         .set_map
-                        .get(&set_name.set)
+                        .get(&set_domain.set)
                         .unwrap()
                         .iter()
                         .map(|si| match si {
@@ -132,38 +128,39 @@ pub fn recurse(expr: Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Te
                 None => panic!("no parts in funcMin domain"),
             }
         }
-        Expr::FuncMax(func) => {
-            let set_name = func.domain.parts.first().cloned();
-            match set_name {
-                Some(set_name) => {
-                    let max_val = lookups
-                        .set_map
-                        .get(&set_name.set)
-                        .unwrap()
-                        .iter()
-                        .map(|si| match si {
-                            IndexVal::Str(_) => panic!("cannot use func max on string index"),
-                            IndexVal::Int(num) => num,
-                        })
-                        .max()
-                        .unwrap();
-                    vec![Term::Num(*max_val as f64)]
-                }
-                None => panic!("no parts in func max domain"),
+        Expr::FuncMax(func) => match func.domain.parts.first() {
+            Some(set_domain) => {
+                let max_val = lookups
+                    .set_map
+                    .get(&set_domain.set)
+                    .unwrap()
+                    .iter()
+                    .map(|si| match si {
+                        IndexVal::Str(_) => panic!("cannot use func max on string index"),
+                        IndexVal::Int(num) => num,
+                    })
+                    .max()
+                    .unwrap();
+                vec![Term::Num(*max_val as f64)]
             }
-        }
+            None => panic!("no parts in func max domain"),
+        },
         Expr::Conditional(conditional) => {
-            let expr = if check_domain_condition(&conditional.condition, lookups, idx_val_map) {
-                *conditional.then_expr
-            } else if let Some(otherwise) = conditional.else_expr {
-                *otherwise
-            } else {
-                Expr::Number(0.0)
-            };
+            let default;
+            let expr: &Expr =
+                if check_domain_condition(&conditional.condition, lookups, idx_val_map) {
+                    &conditional.then_expr
+                } else if let Some(otherwise) = &conditional.else_expr {
+                    otherwise
+                } else {
+                    default = Box::new(Expr::Number(0.0));
+                    &default
+                };
+
             recurse(expr, lookups, idx_val_map)
         }
         Expr::UnaryNeg(inner) => {
-            let terms = recurse(*inner, lookups, idx_val_map);
+            let terms = recurse(inner, lookups, idx_val_map);
             terms
                 .into_iter()
                 .map(|t| match t {
@@ -177,11 +174,11 @@ pub fn recurse(expr: Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Te
                 .collect()
         }
         Expr::BinOp { lhs, op, rhs } => {
-            let lhs = recurse(*lhs, lookups, idx_val_map);
-            let rhs = recurse(*rhs, lookups, idx_val_map);
+            let lhs = recurse(lhs, lookups, idx_val_map);
+            let rhs = recurse(rhs, lookups, idx_val_map);
 
-            let lhs_num = resolve_terms_to_num(lhs.clone());
-            let rhs_num = resolve_terms_to_num(rhs.clone());
+            let lhs_num = resolve_terms_to_num(&lhs);
+            let rhs_num = resolve_terms_to_num(&rhs);
 
             match op {
                 MathOp::Add => match (lhs_num, rhs_num) {
@@ -192,17 +189,16 @@ pub fn recurse(expr: Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Te
                     (Some(lhs), Some(rhs)) => vec![Term::Num(lhs - rhs)],
                     (None, None) => {
                         let rhs_pairs: Vec<Pair> = rhs
-                            .clone()
                             .into_iter()
                             .filter_map(|p| if let Term::Pair(n) = p { Some(n) } else { None })
                             .collect();
 
                         let rhs_pairs_neg: Vec<Term> = rhs_pairs
-                            .iter()
+                            .into_iter()
                             .map(|pair| {
                                 Term::Pair(Pair {
-                                    var: pair.var.clone(),
-                                    index: pair.index.clone(),
+                                    var: pair.var,
+                                    index: pair.index,
                                     coeff: -pair.coeff,
                                 })
                             })
@@ -210,13 +206,13 @@ pub fn recurse(expr: Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Te
                         [lhs, rhs_pairs_neg].concat()
                     }
                     (None, Some(num)) => lhs
-                        .iter()
+                        .into_iter()
                         .map(|p| match p {
                             Term::Num(inner) => Term::Num(inner - num),
                             Term::Pair(pair) => Term::Pair(Pair {
                                 coeff: pair.coeff - num,
-                                index: pair.index.clone(),
-                                var: pair.var.clone(),
+                                index: pair.index,
+                                var: pair.var,
                             }),
                         })
                         .collect(),
@@ -225,15 +221,15 @@ pub fn recurse(expr: Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Te
                 MathOp::Mul => match (lhs_num, rhs_num) {
                     (Some(lhs), Some(rhs)) => vec![Term::Num(lhs * rhs)],
                     (Some(num), None) | (None, Some(num)) => {
-                        let terms = if lhs_num.is_some() { &rhs } else { &lhs };
+                        let terms = if lhs_num.is_some() { rhs } else { lhs };
                         terms
-                            .iter()
+                            .into_iter()
                             .map(|p| match p {
                                 Term::Num(inner) => Term::Num(inner * num),
                                 Term::Pair(pair) => Term::Pair(Pair {
                                     coeff: pair.coeff * num,
-                                    index: pair.index.clone(),
-                                    var: pair.var.clone(),
+                                    index: pair.index,
+                                    var: pair.var,
                                 }),
                             })
                             .collect()
@@ -243,13 +239,13 @@ pub fn recurse(expr: Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Te
                 MathOp::Div => match (lhs_num, rhs_num) {
                     (Some(lhs), Some(rhs)) => vec![Term::Num(lhs / rhs)],
                     (None, Some(num)) => lhs
-                        .iter()
+                        .into_iter()
                         .map(|p| match p {
                             Term::Num(inner) => Term::Num(inner / num),
                             Term::Pair(pair) => Term::Pair(Pair {
                                 coeff: pair.coeff / num,
-                                index: pair.index.clone(),
-                                var: pair.var.clone(),
+                                index: pair.index,
+                                var: pair.var,
                             }),
                         })
                         .collect(),
@@ -298,75 +294,68 @@ impl RowType {
 }
 
 pub fn domain_to_indexes(
-    domain: &Option<Domain>,
+    domain: Option<&Domain>,
     lookups: &Lookups,
-    idx_val_map: &IdxValMap,
+    idx_val_map: Option<&IdxValMap>,
 ) -> Vec<Vec<IndexVal>> {
     match domain {
         None => vec![vec![]],
-        Some(dom) => {
-            let Domain { parts, condition } = dom;
-
-            parts
-                .iter()
-                .map(|p| lookups.set_map.get(&p.set).unwrap().clone())
-                .multi_cartesian_product()
-                .filter_map(|idx| match condition {
-                    None => Some(idx),
-                    Some(logic) => {
-                        let local_idx_map: IdxValMap = parts
-                            .iter()
-                            .zip(idx.iter())
-                            .map(|(part, idx)| (part.var.clone(), idx.clone()))
-                            .collect();
-                        let merged_idx_map = {
-                            let mut m = idx_val_map.clone();
-                            m.extend(local_idx_map);
-                            m
-                        };
-
-                        if check_domain_condition(logic, lookups, &merged_idx_map) {
-                            Some(idx)
-                        } else {
-                            None
-                        }
+        Some(Domain { parts, condition }) => parts
+            .iter()
+            .map(|p| lookups.set_map.get(&p.set).unwrap().clone())
+            .multi_cartesian_product()
+            .filter_map(|idx| match &condition {
+                None => Some(idx),
+                Some(logic) => {
+                    let mut idx_map: IdxValMap = parts
+                        .iter()
+                        .zip(idx.iter())
+                        .map(|(part, idx)| (part.var.clone(), idx.clone()))
+                        .collect();
+                    if let Some(idx_val_map) = idx_val_map {
+                        idx_map.extend(idx_val_map.clone());
                     }
-                })
-                .collect()
-        }
+
+                    if check_domain_condition(logic, lookups, &idx_map) {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                }
+            })
+            .collect(),
     }
 }
 
-pub fn get_idx_val_map(constraint: &Constraint, con_index: &[IndexVal]) -> IdxValMap {
+pub fn get_idx_val_map(domain: &Option<Domain>, con_index: &[IndexVal]) -> IdxValMap {
     // idx_val_map stores the current LOCATION
     // as a dict like:
     // { y => 2014, r: "Africa" }
     //
     // This should be improved so that it also knows which set/dimension
     // each entry comes from...
-    constraint
-        .clone()
-        .domain
-        .unwrap_or_else(|| Domain {
-            parts: vec![],
-            condition: None,
-        })
-        .parts
-        .iter()
-        .zip(con_index.iter())
-        .map(|(part, idx)| (part.var.clone(), idx.clone()))
-        .collect()
+
+    if let Some(domain) = domain {
+        domain
+            .parts
+            .iter()
+            .zip(con_index.iter())
+            .map(|(part, idx)| (part.var.clone(), idx.clone()))
+            .collect()
+    } else {
+        HashMap::new()
+    }
 }
 
 fn check_domain_condition(logic: &LogicExpr, lookups: &Lookups, idx_val_map: &IdxValMap) -> bool {
     match logic {
         LogicExpr::Comparison { lhs, op, rhs } => {
-            let lhs = recurse(lhs.clone(), lookups, idx_val_map);
-            let rhs = recurse(rhs.clone(), lookups, idx_val_map);
+            let lhs = recurse(lhs, lookups, idx_val_map);
+            let rhs = recurse(rhs, lookups, idx_val_map);
 
             // no algebra allowed here!
-            let lhs_num = resolve_terms_to_num(lhs);
-            let rhs_num = resolve_terms_to_num(rhs);
+            let lhs_num = resolve_terms_to_num(&lhs);
+            let rhs_num = resolve_terms_to_num(&rhs);
 
             match (lhs_num, rhs_num) {
                 (Some(lhs), Some(rhs)) => match op {
@@ -398,21 +387,21 @@ fn expand_sum(
     lookups: &Lookups,
     idx_val_map: &IdxValMap,
 ) -> Expr {
-    let sum_indexes = domain_to_indexes(&Some(sum_domain.clone()), lookups, idx_val_map);
+    let sum_indexes = domain_to_indexes(Some(sum_domain), lookups, Some(idx_val_map));
 
-    let substituted: Vec<Expr> = sum_indexes
-        .iter()
-        .map(|idx_combo| {
-            let mut var_map = idx_val_map.clone();
-            for (part, idx) in sum_domain.parts.iter().zip(idx_combo.iter()) {
-                var_map.insert(part.var.clone(), idx.clone());
-            }
-            substitute_vars(operand, &var_map)
-        })
-        .collect();
-
-    substituted
+    sum_indexes
         .into_iter()
+        .map(|idx_combo| {
+            let mut idx_map: IdxValMap = sum_domain
+                .parts
+                .iter()
+                .zip(idx_combo.iter())
+                .map(|(part, idx)| (part.var.clone(), idx.clone()))
+                .collect();
+            idx_map.extend(idx_val_map.clone());
+
+            substitute_vars(operand, &idx_map)
+        })
         .reduce(|acc, expr| Expr::BinOp {
             lhs: Box::new(acc),
             op: MathOp::Add,
@@ -429,21 +418,18 @@ fn substitute_vars(expr: &Expr, con_index_vals: &IdxValMap) -> Expr {
                     .indices
                     .iter()
                     .map(|i| match con_index_vals.get(&i.var) {
-                        Some(s) => {
-                            let index_val = s.clone();
-                            match &i.shift {
-                                Some(shift) => match index_val {
-                                    IndexVal::Str(_) => {
-                                        panic!("tried to index shift on string index val")
-                                    }
-                                    IndexVal::Int(index_num) => match shift {
-                                        IndexShift::Plus => IndexVal::Int(index_num + 1),
-                                        IndexShift::Minus => IndexVal::Int(index_num - 1),
-                                    },
+                        Some(s) => match &i.shift {
+                            Some(shift) => match s {
+                                IndexVal::Str(_) => {
+                                    panic!("tried to index shift on string index val")
+                                }
+                                IndexVal::Int(index_num) => match shift {
+                                    IndexShift::Plus => IndexVal::Int(index_num + 1),
+                                    IndexShift::Minus => IndexVal::Int(index_num - 1),
                                 },
-                                None => index_val,
-                            }
-                        }
+                            },
+                            None => s.clone(),
+                        },
                         None => panic!("unbound variable: {}", i.var),
                     })
                     .collect();
@@ -458,7 +444,7 @@ fn substitute_vars(expr: &Expr, con_index_vals: &IdxValMap) -> Expr {
         }
         Expr::BinOp { lhs, op, rhs } => Expr::BinOp {
             lhs: Box::new(substitute_vars(lhs, con_index_vals)),
-            op: op.clone(),
+            op: *op,
             rhs: Box::new(substitute_vars(rhs, con_index_vals)),
         },
         Expr::Number(n) => Expr::Number(*n),
@@ -467,8 +453,8 @@ fn substitute_vars(expr: &Expr, con_index_vals: &IdxValMap) -> Expr {
     }
 }
 
-fn resolve_terms_to_num(terms: Vec<Term>) -> Option<f64> {
-    terms.into_iter().try_fold(0.0, |acc, t| match t {
+fn resolve_terms_to_num(terms: &[Term]) -> Option<f64> {
+    terms.iter().try_fold(0.0, |acc, t| match t {
         Term::Num(num) => Some(acc + num),
         Term::Pair(_) => None,
     })
@@ -476,32 +462,28 @@ fn resolve_terms_to_num(terms: Vec<Term>) -> Option<f64> {
 
 pub fn algebra(lhs: Vec<Term>, rhs: Vec<Term>) -> (Vec<Pair>, f64) {
     let lhs_nums: Vec<f64> = lhs
-        .clone()
-        .into_iter()
-        .filter_map(|p| if let Term::Num(n) = p { Some(n) } else { None })
+        .iter()
+        .filter_map(|p| if let Term::Num(n) = p { Some(*n) } else { None })
         .collect();
     let rhs_nums: Vec<f64> = rhs
-        .clone()
-        .into_iter()
-        .filter_map(|p| if let Term::Num(n) = p { Some(n) } else { None })
+        .iter()
+        .filter_map(|p| if let Term::Num(n) = p { Some(*n) } else { None })
         .collect();
 
     let lhs_pairs: Vec<Pair> = lhs
-        .clone()
         .into_iter()
         .filter_map(|p| if let Term::Pair(n) = p { Some(n) } else { None })
         .collect();
     let rhs_pairs: Vec<Pair> = rhs
-        .clone()
         .into_iter()
         .filter_map(|p| if let Term::Pair(n) = p { Some(n) } else { None })
         .collect();
 
     let rhs_pairs_neg: Vec<Pair> = rhs_pairs
-        .iter()
+        .into_iter()
         .map(|pair| Pair {
-            var: pair.var.clone(),
-            index: pair.index.clone(),
+            var: pair.var,
+            index: pair.index,
             coeff: -pair.coeff,
         })
         .collect();
