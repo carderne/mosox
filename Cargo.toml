@@ -15,6 +15,7 @@ itertools = "0.14.0"
 log = "0.4.28"
 pest = "2.8.3"
 pest_derive = "2.8.3"
+rayon = "1.11.0"
 
 [lib]
 name = "mptk"
@@ -26,10 +27,12 @@ path = "src/main.rs"
 
 [profile.release]
 debug = true
-# codegen-units = 1
-# lto = "fat"
-# opt-level = 3
-# panic = "abort"
+
+# These add about a 5-10% speedup
+codegen-units = 1
+lto = "fat"
+opt-level = 3
+panic = "abort"
 
 [dev-dependencies]
 assert_cmd = "2.0"

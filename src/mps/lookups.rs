@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, sync::Arc};
 
 use indexmap::IndexMap;
 
@@ -13,7 +13,7 @@ use crate::{
 
 pub struct Lookups {
     pub set_map: IndexMap<String, Vec<IndexVal>>,
-    pub var_map: HashMap<String, Rc<Bounds>>,
+    pub var_map: HashMap<String, Arc<Bounds>>,
     pub par_map: HashMap<String, ParamCont>,
 }
 
@@ -26,7 +26,7 @@ impl Lookups {
                 .collect(),
             var_map: vars
                 .into_iter()
-                .map(|var| (var.name, Rc::new(Bounds::from_gmpl_bounds(var.bounds))))
+                .map(|var| (var.name, Arc::new(Bounds::from_gmpl_bounds(var.bounds))))
                 .collect(),
             par_map: pars
                 .into_iter()

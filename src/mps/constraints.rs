@@ -60,7 +60,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
             if lookups.var_map.contains_key(name) {
                 vec![Term::Pair(Pair {
                     coeff: 1.0,
-                    index: index,
+                    index,
                     var: name.clone(),
                 })]
             } else if let Some(param) = lookups.par_map.get(name) {
