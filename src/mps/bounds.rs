@@ -5,12 +5,12 @@ use crate::{
     mps::{BoundsMap, ColsMap, lookups::Lookups},
 };
 
-pub fn gen_bounds(cols: &ColsMap, lookups: &Lookups) -> BoundsMap {
-    cols.into_iter()
+pub fn gen_bounds(cols: &ColsMap, lookups: Lookups) -> BoundsMap {
+    cols.iter()
         .map(|((var_name, var_idx), _)| {
             (
                 (var_name.clone(), var_idx.clone()),
-                lookups.var_map.get(var_name).unwrap().clone(),
+                lookups.var_map.get(var_name.as_str()).unwrap().clone(),
             )
         })
         .collect()

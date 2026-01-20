@@ -5,6 +5,7 @@ pub mod output;
 mod params;
 
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use indexmap::IndexMap;
@@ -18,11 +19,12 @@ use crate::mps::constraints::{
 use crate::mps::lookups::Lookups;
 
 //                    var     var_index                 con     con_index       val
-type ColsMap = IndexMap<(String, Vec<IndexVal>), IndexMap<(String, Vec<IndexVal>), f64>>;
+type ColsMap =
+    IndexMap<(Rc<String>, Rc<Vec<IndexVal>>), IndexMap<(Rc<String>, Rc<Vec<IndexVal>>), f64>>;
 //                      con     con_index        type     rhs
-type RowsMap = IndexMap<(String, Vec<IndexVal>), (RowType, Option<f64>)>;
+type RowsMap = IndexMap<(Rc<String>, Rc<Vec<IndexVal>>), (RowType, Option<f64>)>;
 //                      var     var_index       bounds
-type BoundsMap = IndexMap<(String, Vec<IndexVal>), Bounds>;
+type BoundsMap = IndexMap<(Rc<String>, Rc<Vec<IndexVal>>), Rc<Bounds>>;
 
 pub struct Compiled {
     cols: ColsMap,
@@ -41,7 +43,8 @@ pub fn compile_mps(model: ModelWithData) -> Compiled {
 
     let lookups = Lookups::from_model(sets, vars, pars);
     let (cols, rows) = build_constraints(objective, constraints, &lookups);
-    let bounds = gen_bounds(&cols, &lookups);
+    let bounds = gen_bounds(&cols, lookups);
+
     Compiled { cols, rows, bounds }
 }
 
@@ -53,31 +56,38 @@ fn build_constraints(
     let mut rows: RowsMap = IndexMap::new();
     let mut cols: ColsMap = IndexMap::new();
 
+    let obj_name = Rc::new(objective.name);
+
     // First the objective alone
     // Objective is always "singular": it has no domain
-    rows.insert((objective.name.clone(), vec![]), (RowType::N, None));
+    rows.insert((obj_name.clone(), Rc::new(vec![])), (RowType::N, None));
     let pairs = recurse(&objective.expr, lookups, &HashMap::new());
     for pair in pairs {
         match pair {
             Term::Num(_) => panic!("unhandled: objective function has a const in it"),
             Term::Pair(pair) => {
-                cols.entry((pair.var, pair.index.unwrap_or_else(Vec::new)))
-                    .or_default()
-                    .insert((objective.name.clone(), vec![]), pair.coeff);
+                cols.entry((
+                    Rc::new(pair.var),
+                    Rc::new(pair.index.unwrap_or_else(Vec::new)),
+                ))
+                .or_default()
+                .insert((obj_name.clone(), Rc::new(vec![])), pair.coeff);
             }
         }
     }
 
     // Then all the actual constraints
-    let mut constraint_times: Vec<(String, Duration)> = Vec::new();
+    let mut constraint_times: Vec<(Rc<String>, Duration)> = Vec::new();
     for constraint in constraints {
         let tc = Instant::now();
 
         let Constraint { name, domain, expr } = constraint;
+        let name = Rc::new(name);
 
         let con_indexes = domain_to_indexes(domain.as_ref(), lookups, None);
 
         for con_index in con_indexes {
+            let con_index = Rc::new(con_index);
             let dir = RowType::from_rel_op(&expr.op);
             let idx_val_map = get_idx_val_map(&domain, &con_index);
 
@@ -89,13 +99,16 @@ fn build_constraints(
             rows.insert((name.clone(), con_index.clone()), (dir, Some(rhs_total)));
 
             for pair in pairs {
-                cols.entry((pair.var, pair.index.unwrap_or_else(Vec::new)))
-                    .or_default()
-                    .insert((name.clone(), con_index.clone()), pair.coeff);
+                cols.entry((
+                    Rc::new(pair.var),
+                    Rc::new(pair.index.unwrap_or_else(Vec::new)),
+                ))
+                .or_default()
+                .insert((name.clone(), con_index.clone()), pair.coeff);
             }
         }
 
-        constraint_times.push((name.clone(), tc.elapsed()));
+        constraint_times.push((name, tc.elapsed()));
     }
 
     // Print timing summary

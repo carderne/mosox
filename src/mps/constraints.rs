@@ -30,7 +30,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
         Expr::VarSubscripted(var_or_param) => {
             let name = &var_or_param.var;
 
-            let concrete: Option<Vec<IndexVal>> = if let Some(c) = &var_or_param.concrete {
+            let index = if let Some(c) = &var_or_param.index {
                 // Already resolved by sum expansion
                 Some(c.clone())
             } else {
@@ -39,7 +39,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                         .indices
                         .iter()
                         .map(|i| {
-                            let index_val = idx_val_map.get(&i.var).unwrap().clone();
+                            let index_val = idx_val_map.get(&i.var).unwrap();
                             match &i.shift {
                                 Some(shift) => match index_val {
                                     IndexVal::Str(_) => {
@@ -50,7 +50,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                                         IndexShift::Minus => IndexVal::Int(index_num - 1),
                                     },
                                 },
-                                None => index_val,
+                                None => index_val.clone(),
                             }
                         })
                         .collect()
@@ -60,14 +60,14 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
             if lookups.var_map.contains_key(name) {
                 vec![Term::Pair(Pair {
                     coeff: 1.0,
-                    index: concrete,
+                    index: index,
                     var: name.clone(),
                 })]
             } else if let Some(param) = lookups.par_map.get(name) {
                 match &param.data {
                     ParamArr::Scalar(num) => vec![Term::Num(*num)],
                     ParamArr::Arr(arr) => {
-                        let arr_idx = concrete.expect("concrete is none");
+                        let arr_idx = index.expect("index is none");
                         if let Some(arr_val) = arr.get(&arr_idx) {
                             vec![Term::Num(*arr_val)]
                         } else {
@@ -309,8 +309,8 @@ pub fn domain_to_indexes(
                 Some(logic) => {
                     let mut idx_map: IdxValMap = parts
                         .iter()
-                        .zip(idx.iter())
-                        .map(|(part, idx)| (part.var.clone(), idx.clone()))
+                        .zip(idx.iter().cloned())
+                        .map(|(part, idx_val)| (part.var.clone(), idx_val))
                         .collect();
                     if let Some(idx_val_map) = idx_val_map {
                         idx_map.extend(idx_val_map.clone());
@@ -339,8 +339,8 @@ pub fn get_idx_val_map(domain: &Option<Domain>, con_index: &[IndexVal]) -> IdxVa
         domain
             .parts
             .iter()
-            .zip(con_index.iter())
-            .map(|(part, idx)| (part.var.clone(), idx.clone()))
+            .zip(con_index.iter().cloned())
+            .map(|(part, idx_val)| (part.var.clone(), idx_val))
             .collect()
     } else {
         HashMap::new()
@@ -387,16 +387,14 @@ fn expand_sum(
     lookups: &Lookups,
     idx_val_map: &IdxValMap,
 ) -> Expr {
-    let sum_indexes = domain_to_indexes(Some(sum_domain), lookups, Some(idx_val_map));
-
-    sum_indexes
+    domain_to_indexes(Some(sum_domain), lookups, Some(idx_val_map))
         .into_iter()
-        .map(|idx_combo| {
+        .map(|idx| {
             let mut idx_map: IdxValMap = sum_domain
                 .parts
                 .iter()
-                .zip(idx_combo.iter())
-                .map(|(part, idx)| (part.var.clone(), idx.clone()))
+                .zip(idx.iter().cloned())
+                .map(|(part, idx_val)| (part.var.clone(), idx_val))
                 .collect();
             idx_map.extend(idx_val_map.clone());
 
@@ -437,7 +435,7 @@ fn substitute_vars(expr: &Expr, con_index_vals: &IdxValMap) -> Expr {
                 return Expr::VarSubscripted(VarSubscripted {
                     var: vs.var.clone(),
                     subscript: None,
-                    concrete: Some(concrete),
+                    index: Some(concrete),
                 });
             }
             Expr::VarSubscripted(vs.clone())
