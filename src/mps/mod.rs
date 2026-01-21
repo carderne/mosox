@@ -10,7 +10,7 @@ use std::sync::Arc;
 use indexmap::IndexMap;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-use crate::gmpl::{Constraint, IndexVal, Objective};
+use crate::gmpl::{Constraint, Objective, SetVal};
 use crate::model::ModelWithData;
 use crate::mps::bounds::{Bounds, gen_bounds};
 use crate::mps::constraints::{
@@ -20,11 +20,11 @@ use crate::mps::lookups::Lookups;
 
 //                    var     var_index                 con     con_index       val
 type ColsMap =
-    IndexMap<(Arc<String>, Arc<Vec<IndexVal>>), IndexMap<(Arc<String>, Arc<Vec<IndexVal>>), f64>>;
+    IndexMap<(Arc<String>, Arc<Vec<SetVal>>), IndexMap<(Arc<String>, Arc<Vec<SetVal>>), f64>>;
 //                      con     con_index        type     rhs
-type RowsMap = IndexMap<(Arc<String>, Arc<Vec<IndexVal>>), (RowType, Option<f64>)>;
+type RowsMap = IndexMap<(Arc<String>, Arc<Vec<SetVal>>), (RowType, Option<f64>)>;
 //                      var     var_index       bounds
-type BoundsMap = IndexMap<(Arc<String>, Arc<Vec<IndexVal>>), Arc<Bounds>>;
+type BoundsMap = IndexMap<(Arc<String>, Arc<Vec<SetVal>>), Arc<Bounds>>;
 
 pub struct Compiled {
     cols: ColsMap,
@@ -34,12 +34,11 @@ pub struct Compiled {
 
 struct Con {
     name: Arc<String>,
-    idx: Arc<Vec<IndexVal>>,
+    idx: Arc<Vec<SetVal>>,
     row_type: RowType,
     rhs: Option<f64>,
     pairs: Vec<Pair>,
 }
-
 
 pub fn compile_mps(model: ModelWithData) -> Compiled {
     let ModelWithData {

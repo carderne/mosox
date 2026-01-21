@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use indexmap::IndexMap;
 
 use crate::{
-    gmpl::{IndexVal, Var},
+    gmpl::{SetVal, Var},
     model::{ParamWithData, SetWithData},
     mps::{
         bounds::Bounds,
@@ -12,7 +12,7 @@ use crate::{
 };
 
 pub struct Lookups {
-    pub set_map: IndexMap<String, Vec<IndexVal>>,
+    pub set_map: IndexMap<String, Vec<SetVal>>,
     pub var_map: HashMap<String, Arc<Bounds>>,
     pub par_map: HashMap<String, ParamCont>,
 }

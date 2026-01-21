@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::gmpl::Expr;
-use crate::gmpl::{IndexVal, ParamDataBody, ParamDataTarget};
+use crate::gmpl::{ParamDataBody, ParamDataTarget, SetVal};
 use crate::model::ParamWithData;
 
 pub struct ParamCont {
@@ -9,7 +9,7 @@ pub struct ParamCont {
     pub default: Option<Expr>,
 }
 pub enum ParamArr {
-    Arr(HashMap<Vec<IndexVal>, f64>),
+    Arr(HashMap<Vec<SetVal>, f64>),
     Scalar(f64),
     Expr(Expr),
     None,
@@ -26,7 +26,7 @@ pub fn resolve_param(param: ParamWithData) -> ParamCont {
                 default,
             },
             ParamDataBody::List(pairs) => {
-                let mut arr: HashMap<Vec<IndexVal>, f64> = HashMap::new();
+                let mut arr: HashMap<Vec<SetVal>, f64> = HashMap::new();
                 for pair in pairs {
                     arr.insert(vec![pair.key], pair.value);
                 }
@@ -36,14 +36,14 @@ pub fn resolve_param(param: ParamWithData) -> ParamCont {
                 }
             }
             ParamDataBody::Tables(tables) => {
-                let mut arr: HashMap<Vec<IndexVal>, f64> = HashMap::new();
+                let mut arr: HashMap<Vec<SetVal>, f64> = HashMap::new();
                 for table in tables {
                     // Expressions like:
                     // [Atlantis_00A,NGCC,NOx,*,*]:
                     // Become prefixes for the indexes down below
                     // NOTE: Current implementation ONLY supports having exactly two * (Any)
                     // targets, and they must be the last two
-                    let target_idxs: Vec<IndexVal> = match table.target {
+                    let target_idxs: Vec<SetVal> = match table.target {
                         Some(targets) => targets
                             .into_iter()
                             .filter_map(|t| match t {

@@ -1,5 +1,5 @@
 use crate::{
-    gmpl::IndexVal,
+    gmpl::SetVal,
     mps::{BoundsMap, ColsMap, Compiled, RowsMap, bounds::BoundsOp},
 };
 
@@ -71,7 +71,7 @@ fn print_bounds(bounds: BoundsMap) {
     }
 }
 
-fn format_index_vals(v: &[IndexVal]) -> String {
+fn format_index_vals(v: &[SetVal]) -> String {
     if v.is_empty() {
         String::new()
     } else {

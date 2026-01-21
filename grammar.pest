@@ -50,7 +50,7 @@ param_default   =  { "default" ~ (expr | string_literal) }
 
 // Set
 // Example: set DAILYTIMEBRACKET;
-SET = { "set" ~ name ~ ";" }
+SET           = { "set" ~ id ~ ";" }
 
 // Constraint
 // Example: s.t. Capacity{r in REGION}: NewCap[r] = 2
@@ -102,8 +102,8 @@ data_entry = _{
 }
 
 // Data: Set
-DATA_SET     = { "set" ~ name ~ ":="? ~ index_val+ ~ ";" }
-index_val    = { id | index_int }
+DATA_SET   = { "set" ~ name ~ (":=" ~ set_val+)? ~ ";" }
+set_val    = { id | int }
 
 // Data: Param
 DATA_PARAM          =  {
@@ -115,10 +115,10 @@ param_data_body =      { param_data_scalar | param_data_matrix+ | param_data_lis
 // As there's no way to unambiguously parse in PEST (needs post-processing)
 param_data_scalar   = @{ number }
 param_data_list     =  { param_data_pair+ }
-param_data_pair     =  { index_val ~ number }
+param_data_pair     =  { set_val ~ number }
 param_data_matrix   =  { param_data_target? ~ ":" ~ param_data_cols ~ ":="? ~ param_data_row+ }
-param_data_cols     =  { index_val+ }
-param_data_row      = ${ index_val ~ param_data_row_vals }
+param_data_cols     =  { set_val+ }
+param_data_row      = ${ set_val ~ param_data_row_vals }
 param_data_row_vals = ${ ((" " | "\t")+ ~ param_data_val)+ }
 param_data_val      = @{ number }
 param_data_target   =  { "[" ~ (index_var | param_data_any) ~ ("," ~ (index_var | param_data_any))* ~ "]" }
@@ -192,7 +192,7 @@ rel_op           =  { "<=" | "<>" | "<" | "==" | "=" | ">=" | ">" | "!=" }
 name      = @{ id }
 id        = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
 number    = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }
-index_int = @{ ASCII_DIGIT+ }
+int       = @{ ASCII_DIGIT+ }
 
 // String literal
 string_literal =  { single_quoted | double_quoted }

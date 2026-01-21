@@ -3,7 +3,7 @@ use std::fmt;
 
 use crate::gmpl::atoms::{BoolOp, Domain, IndexShift, RelOp, VarSubscripted};
 use crate::gmpl::{Expr, atoms::MathOp};
-use crate::gmpl::{IndexVal, LogicExpr};
+use crate::gmpl::{LogicExpr, SetVal};
 use crate::mps::lookups::Lookups;
 use crate::mps::params::ParamArr;
 use itertools::Itertools;
@@ -11,7 +11,7 @@ use itertools::Itertools;
 #[derive(Clone, Debug)]
 pub struct Pair {
     pub var: String,
-    pub index: Option<Vec<IndexVal>>,
+    pub index: Option<Vec<SetVal>>,
     pub coeff: f64,
 }
 
@@ -22,7 +22,7 @@ pub enum Term {
 }
 
 //                       index   index value
-type IdxValMap = HashMap<String, IndexVal>;
+type IdxValMap = HashMap<String, SetVal>;
 
 pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Term> {
     match expr {
@@ -42,12 +42,12 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                             let index_val = idx_val_map.get(&i.var).unwrap();
                             match &i.shift {
                                 Some(shift) => match index_val {
-                                    IndexVal::Str(_) => {
+                                    SetVal::Str(_) => {
                                         panic!("tried to index shift on string index val")
                                     }
-                                    IndexVal::Int(index_num) => match shift {
-                                        IndexShift::Plus => IndexVal::Int(index_num + 1),
-                                        IndexShift::Minus => IndexVal::Int(index_num - 1),
+                                    SetVal::Int(index_num) => match shift {
+                                        IndexShift::Plus => SetVal::Int(index_num + 1),
+                                        IndexShift::Minus => SetVal::Int(index_num - 1),
                                     },
                                 },
                                 None => index_val.clone(),
@@ -90,8 +90,8 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                 // Use the current index value (eg y=>2014) as an actual value
                 // Mostly (only?) used in domain condition expressions
                 match index_val {
-                    IndexVal::Str(_) => panic!("cannot use a string SetIndex here"),
-                    IndexVal::Int(num) => vec![Term::Num(*num as f64)],
+                    SetVal::Str(_) => panic!("cannot use a string SetIndex here"),
+                    SetVal::Int(num) => vec![Term::Num(*num as f64)],
                 }
             } else {
                 panic!(
@@ -118,8 +118,8 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                         .unwrap()
                         .iter()
                         .map(|si| match si {
-                            IndexVal::Str(_) => panic!("cannot use func min on string index"),
-                            IndexVal::Int(num) => num,
+                            SetVal::Str(_) => panic!("cannot use func min on string index"),
+                            SetVal::Int(num) => num,
                         })
                         .min()
                         .unwrap();
@@ -136,8 +136,8 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                     .unwrap()
                     .iter()
                     .map(|si| match si {
-                        IndexVal::Str(_) => panic!("cannot use func max on string index"),
-                        IndexVal::Int(num) => num,
+                        SetVal::Str(_) => panic!("cannot use func max on string index"),
+                        SetVal::Int(num) => num,
                     })
                     .max()
                     .unwrap();
@@ -297,7 +297,7 @@ pub fn domain_to_indexes(
     domain: Option<&Domain>,
     lookups: &Lookups,
     idx_val_map: Option<&IdxValMap>,
-) -> Vec<Vec<IndexVal>> {
+) -> Vec<Vec<SetVal>> {
     match domain {
         None => vec![vec![]],
         Some(Domain { parts, condition }) => parts
@@ -327,7 +327,7 @@ pub fn domain_to_indexes(
     }
 }
 
-pub fn get_idx_val_map(domain: &Option<Domain>, con_index: &[IndexVal]) -> IdxValMap {
+pub fn get_idx_val_map(domain: &Option<Domain>, con_index: &[SetVal]) -> IdxValMap {
     // idx_val_map stores the current LOCATION
     // as a dict like:
     // { y => 2014, r: "Africa" }
@@ -412,18 +412,18 @@ fn substitute_vars(expr: &Expr, con_index_vals: &IdxValMap) -> Expr {
     match expr {
         Expr::VarSubscripted(vs) => {
             if let Some(subscript) = &vs.subscript {
-                let concrete: Vec<IndexVal> = subscript
+                let concrete: Vec<SetVal> = subscript
                     .indices
                     .iter()
                     .map(|i| match con_index_vals.get(&i.var) {
                         Some(s) => match &i.shift {
                             Some(shift) => match s {
-                                IndexVal::Str(_) => {
+                                SetVal::Str(_) => {
                                     panic!("tried to index shift on string index val")
                                 }
-                                IndexVal::Int(index_num) => match shift {
-                                    IndexShift::Plus => IndexVal::Int(index_num + 1),
-                                    IndexShift::Minus => IndexVal::Int(index_num - 1),
+                                SetVal::Int(index_num) => match shift {
+                                    IndexShift::Plus => SetVal::Int(index_num + 1),
+                                    IndexShift::Minus => SetVal::Int(index_num - 1),
                                 },
                             },
                             None => s.clone(),
