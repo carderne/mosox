@@ -105,7 +105,6 @@ fn build_constraints(constraints: Vec<Constraint>, lookups: &Lookups) -> Vec<Con
         .into_par_iter()
         .flat_map(|Constraint { name, domain, expr }| {
             let name = Arc::new(name);
-            dbg!(&name);
             domain
                 .as_ref()
                 .map_or(vec![], |d| domain_to_indexes(d, lookups, None))

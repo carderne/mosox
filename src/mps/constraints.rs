@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::gmpl::atoms::{
-    BoolOp, Domain, DomainPart, DomainPartVar, IndexShift, RelOp, VarSubscripted,
-};
+use crate::gmpl::atoms::{BoolOp, Domain, DomainPart, DomainPartVar, IndexShift, RelOp};
 use crate::gmpl::{Expr, atoms::MathOp};
 use crate::gmpl::{LogicExpr, SetVal, SetValTerminal};
 use crate::mps::lookup::Lookups;
@@ -35,35 +33,32 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
         Expr::VarSubscripted(var_or_param) => {
             let name = &var_or_param.var;
 
-            let index = if let Some(c) = &var_or_param.index {
-                // Already resolved by sum expansion
-                Some(c.clone())
-            } else {
-                var_or_param.subscript.as_ref().map(|subscript| {
-                    subscript
-                        .indices
-                        .iter()
-                        .map(|i| {
-                            let index_val = idx_val_map.get(&i.var).unwrap();
-                            match &i.shift {
-                                Some(shift) => match index_val {
-                                    SetVal::Str(_) => {
-                                        panic!("tried to index shift on string index val")
-                                    }
-                                    SetVal::Int(index_num) => match shift {
-                                        IndexShift::Plus => SetVal::Int(index_num + 1),
-                                        IndexShift::Minus => SetVal::Int(index_num - 1),
-                                    },
-                                    SetVal::Vec(_) => {
-                                        panic!("tuple set not allowed in var subscript")
-                                    }
+            // Need to convert from symbolic subscript references
+            // to concrete index values
+            let index = var_or_param.subscript.as_ref().map(|subscript| {
+                subscript
+                    .indices
+                    .iter()
+                    .map(|i| {
+                        let index_val = idx_val_map.get(&i.var).unwrap();
+                        match &i.shift {
+                            Some(shift) => match index_val {
+                                SetVal::Str(_) => {
+                                    panic!("tried to index shift on string index val")
+                                }
+                                SetVal::Int(index_num) => match shift {
+                                    IndexShift::Plus => SetVal::Int(index_num + 1),
+                                    IndexShift::Minus => SetVal::Int(index_num - 1),
                                 },
-                                None => index_val.clone(),
-                            }
-                        })
-                        .collect()
-                })
-            };
+                                SetVal::Vec(_) => {
+                                    panic!("tuple set not allowed in var subscript")
+                                }
+                            },
+                            None => index_val.clone(),
+                        }
+                    })
+                    .collect()
+            });
 
             if lookups.var_map.contains_key(name) {
                 vec![Term::Pair(Pair {
@@ -109,10 +104,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                 );
             }
         }
-        Expr::FuncSum(func) => {
-            let new_expr = expand_sum(&func.operand, &func.domain, lookups, idx_val_map);
-            recurse(&new_expr, lookups, idx_val_map)
-        }
+        Expr::FuncSum(func) => expand_sum(&func.operand, &func.domain, lookups, idx_val_map),
         Expr::FuncMin(func) => {
             let val = eval_func_minmax(&func.domain, true, lookups, idx_val_map);
             vec![Term::Num(val)]
@@ -137,18 +129,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
         }
         Expr::UnaryNeg(inner) => {
             let terms = recurse(inner, lookups, idx_val_map);
-            terms
-                .into_iter()
-                .map(|t| match t {
-                    Term::Str(_) => panic!("Cannot unary neg a string term"),
-                    Term::Num(n) => Term::Num(-n),
-                    Term::Pair(p) => Term::Pair(Pair {
-                        coeff: -p.coeff,
-                        var: p.var,
-                        index: p.index,
-                    }),
-                })
-                .collect()
+            negate_terms(terms)
         }
         Expr::BinOp { lhs, op, rhs } => {
             let lhs = recurse(lhs, lookups, idx_val_map);
@@ -380,77 +361,15 @@ fn expand_sum(
     sum_domain: &Domain,
     lookups: &Lookups,
     idx_val_map: &IdxValMap,
-) -> Expr {
+) -> Vec<Term> {
     domain_to_indexes(sum_domain, lookups, Some(idx_val_map))
         .into_iter()
-        .map(|idx| {
+        .flat_map(|idx| {
             let mut idx_map = index_map_from_parts(&sum_domain.parts, &idx);
             idx_map.extend(idx_val_map.clone());
-
-            substitute_vars(operand, lookups, &idx_map)
+            recurse(operand, lookups, &idx_map)
         })
-        .reduce(|acc, expr| Expr::BinOp {
-            lhs: Box::new(acc),
-            op: MathOp::Add,
-            rhs: Box::new(expr),
-        })
-        .unwrap_or(Expr::Number(0.0))
-}
-
-fn substitute_vars(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Expr {
-    match expr {
-        Expr::VarSubscripted(vs) => {
-            if let Some(subscript) = &vs.subscript {
-                let concrete: Vec<SetVal> = subscript
-                    .indices
-                    .iter()
-                    .map(|i| match idx_val_map.get(&i.var) {
-                        Some(s) => match &i.shift {
-                            Some(shift) => match s {
-                                SetVal::Str(_) => {
-                                    panic!("tried to index shift on string index val")
-                                }
-                                SetVal::Int(index_num) => match shift {
-                                    IndexShift::Plus => SetVal::Int(index_num + 1),
-                                    IndexShift::Minus => SetVal::Int(index_num - 1),
-                                },
-                                SetVal::Vec(_) => panic!("tried to index shift on tuple index"),
-                            },
-                            None => s.clone(),
-                        },
-                        None => panic!("unbound variable: {}", i.var),
-                    })
-                    .collect();
-
-                return Expr::VarSubscripted(VarSubscripted {
-                    var: vs.var.clone(),
-                    subscript: None,
-                    index: Some(concrete),
-                });
-            }
-            Expr::VarSubscripted(vs.clone())
-        }
-        Expr::BinOp { lhs, op, rhs } => Expr::BinOp {
-            lhs: Box::new(substitute_vars(lhs, lookups, idx_val_map)),
-            op: *op,
-            rhs: Box::new(substitute_vars(rhs, lookups, idx_val_map)),
-        },
-        Expr::Number(n) => Expr::Number(*n),
-        Expr::UnaryNeg(inner) => {
-            // TODO need to be negated?
-            Expr::UnaryNeg(Box::new(substitute_vars(inner, lookups, idx_val_map)))
-        }
-        Expr::FuncSum(func) => expand_sum(&func.operand, &func.domain, lookups, idx_val_map),
-        Expr::FuncMin(func) => {
-            let val = eval_func_minmax(&func.domain, true, lookups, idx_val_map);
-            Expr::Number(val)
-        }
-        Expr::FuncMax(func) => {
-            let val = eval_func_minmax(&func.domain, false, lookups, idx_val_map);
-            Expr::Number(val)
-        }
-        _ => panic!("expr not supported in substition: {}", &expr),
-    }
+        .collect()
 }
 
 fn resolve_terms_to_num(terms: &[Term]) -> Option<f64> {
@@ -468,7 +387,10 @@ fn resolve_terms_to_term(terms: &[Term]) -> Term {
 
     match &terms[0] {
         Term::Str(s) => Term::Str(s.clone()),
-        Term::Pair(_) => panic!("Cannot have variables in final domain condition check"),
+        Term::Pair(pair) => panic!(
+            "Cannot have variables in final domain condition check: {:?}",
+            pair
+        ),
         Term::Num(_) => Term::Num(terms.iter().fold(0.0, |acc, t| match t {
             Term::Str(_) => panic!("mixed term types"),
             Term::Num(num) => acc + num,
@@ -571,4 +493,19 @@ fn eval_func_minmax(
         }
         None => panic!("no parts in func min/max domain"),
     }
+}
+
+fn negate_terms(terms: Vec<Term>) -> Vec<Term> {
+    terms
+        .into_iter()
+        .map(|t| match t {
+            Term::Str(_) => panic!("Cannot unary neg a string term"),
+            Term::Num(n) => Term::Num(-n),
+            Term::Pair(p) => Term::Pair(Pair {
+                coeff: -p.coeff,
+                var: p.var,
+                index: p.index,
+            }),
+        })
+        .collect()
 }

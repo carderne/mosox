@@ -3,10 +3,7 @@ use std::fmt;
 use pest::iterators::Pair;
 
 use crate::{
-    gmpl::{
-        SetVal,
-        expr::{Expr, LogicExpr},
-    },
+    gmpl::expr::{Expr, LogicExpr},
     grammar::Rule,
 };
 
@@ -230,7 +227,6 @@ impl fmt::Display for BoolOp {
 pub struct VarSubscripted {
     pub var: String,
     pub subscript: Option<Subscript>,
-    pub index: Option<Vec<SetVal>>,
 }
 
 impl VarSubscripted {
@@ -246,11 +242,7 @@ impl VarSubscripted {
             }
         }
 
-        Self {
-            var,
-            subscript,
-            index: None,
-        }
+        Self { var, subscript }
     }
 }
 
