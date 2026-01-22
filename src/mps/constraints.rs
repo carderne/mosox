@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::gmpl::atoms::{BoolOp, Domain, IndexShift, RelOp, VarSubscripted};
+use crate::gmpl::atoms::{
+    BoolOp, Domain, DomainPart, DomainPartVar, IndexShift, RelOp, VarSubscripted,
+};
 use crate::gmpl::{Expr, atoms::MathOp};
-use crate::gmpl::{LogicExpr, SetVal};
-use crate::mps::lookups::Lookups;
-use crate::mps::params::ParamArr;
+use crate::gmpl::{LogicExpr, SetVal, SetValTerminal};
+use crate::mps::lookup::Lookups;
+use crate::mps::param::ParamVal;
 use itertools::Itertools;
 
 #[derive(Clone, Debug)]
@@ -49,6 +51,9 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                                         IndexShift::Plus => SetVal::Int(index_num + 1),
                                         IndexShift::Minus => SetVal::Int(index_num - 1),
                                     },
+                                    SetVal::Vec(_) => {
+                                        panic!("tuple set not allowed in var subscript")
+                                    }
                                 },
                                 None => index_val.clone(),
                             }
@@ -65,8 +70,8 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                 })]
             } else if let Some(param) = lookups.par_map.get(name) {
                 match &param.data {
-                    ParamArr::Scalar(num) => vec![Term::Num(*num)],
-                    ParamArr::Arr(arr) => {
+                    ParamVal::Scalar(num) => vec![Term::Num(*num)],
+                    ParamVal::Arr(arr) => {
                         let arr_idx = index.expect("index is none");
                         if let Some(arr_val) = arr.get(&arr_idx) {
                             vec![Term::Num(*arr_val)]
@@ -77,11 +82,11 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                             }
                         }
                     }
-                    ParamArr::Expr(expr) => {
+                    ParamVal::Expr(expr) => {
                         let res = recurse(expr, lookups, idx_val_map);
                         res
                     }
-                    ParamArr::None => match &param.default {
+                    ParamVal::None => match &param.default {
                         Some(expr) => recurse(expr, lookups, idx_val_map),
                         None => panic!("tried to get uninitialized param: {}", name),
                     },
@@ -92,6 +97,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                 match index_val {
                     SetVal::Str(_) => panic!("cannot use a string SetIndex here"),
                     SetVal::Int(num) => vec![Term::Num(*num as f64)],
+                    SetVal::Vec(_) => panic!("tuple set not allowed in var subscript"),
                 }
             } else {
                 panic!(
@@ -104,47 +110,8 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
             let new_expr = expand_sum(&func.operand, &func.domain, lookups, idx_val_map);
             recurse(&new_expr, lookups, idx_val_map)
         }
-        Expr::FuncMin(func) => {
-            // FuncMin looks like this:
-            // min{y in YEAR} min(y)
-            // Assumptions:
-            // - always only one dimension
-            // - always just getting the min of that set
-            match func.domain.parts.first() {
-                Some(set_domain) => {
-                    let min_val = lookups
-                        .set_map
-                        .get(&set_domain.set)
-                        .unwrap()
-                        .iter()
-                        .map(|si| match si {
-                            SetVal::Str(_) => panic!("cannot use func min on string index"),
-                            SetVal::Int(num) => num,
-                        })
-                        .min()
-                        .unwrap();
-                    vec![Term::Num(*min_val as f64)]
-                }
-                None => panic!("no parts in funcMin domain"),
-            }
-        }
-        Expr::FuncMax(func) => match func.domain.parts.first() {
-            Some(set_domain) => {
-                let max_val = lookups
-                    .set_map
-                    .get(&set_domain.set)
-                    .unwrap()
-                    .iter()
-                    .map(|si| match si {
-                        SetVal::Str(_) => panic!("cannot use func max on string index"),
-                        SetVal::Int(num) => num,
-                    })
-                    .max()
-                    .unwrap();
-                vec![Term::Num(*max_val as f64)]
-            }
-            None => panic!("no parts in func max domain"),
-        },
+        Expr::FuncMin(func) => eval_func_minmax(&func.domain, true, lookups, idx_val_map),
+        Expr::FuncMax(func) => eval_func_minmax(&func.domain, false, lookups, idx_val_map),
         Expr::Conditional(conditional) => {
             let default;
             let expr: &Expr =
@@ -294,37 +261,44 @@ impl RowType {
 }
 
 pub fn domain_to_indexes(
-    domain: Option<&Domain>,
+    domain: &Domain,
     lookups: &Lookups,
     idx_val_map: Option<&IdxValMap>,
 ) -> Vec<Vec<SetVal>> {
-    match domain {
-        None => vec![vec![]],
-        Some(Domain { parts, condition }) => parts
-            .iter()
-            .map(|p| lookups.set_map.get(&p.set).unwrap().clone())
-            .multi_cartesian_product()
-            .filter_map(|idx| match &condition {
-                None => Some(idx),
-                Some(logic) => {
-                    let mut idx_map: IdxValMap = parts
-                        .iter()
-                        .zip(idx.iter().cloned())
-                        .map(|(part, idx_val)| (part.var.clone(), idx_val))
-                        .collect();
-                    if let Some(idx_val_map) = idx_val_map {
-                        idx_map.extend(idx_val_map.clone());
-                    }
-
-                    if check_domain_condition(logic, lookups, &idx_map) {
-                        Some(idx)
-                    } else {
-                        None
-                    }
+    let Domain { parts, condition } = domain;
+    parts
+        .iter()
+        .map(|p| {
+            let concrete_set_keys: Vec<_> = idx_val_map.map_or(vec![], |i| {
+                p.idx
+                    .iter()
+                    .map(|k| i.get(&k.var).unwrap().clone())
+                    .collect()
+            });
+            lookups
+                .set_map
+                .get(&p.set)
+                .unwrap()
+                .resolve(&concrete_set_keys, lookups)
+                .clone()
+        })
+        .multi_cartesian_product()
+        .filter_map(|idx| match &condition {
+            None => Some(idx),
+            Some(logic) => {
+                let mut idx_map = index_map_from_parts(parts, &idx);
+                if let Some(idx_val_map) = idx_val_map {
+                    idx_map.extend(idx_val_map.clone());
                 }
-            })
-            .collect(),
-    }
+
+                if check_domain_condition(logic, lookups, &idx_map) {
+                    Some(idx)
+                } else {
+                    None
+                }
+            }
+        })
+        .collect()
 }
 
 pub fn get_idx_val_map(domain: &Option<Domain>, con_index: &[SetVal]) -> IdxValMap {
@@ -340,7 +314,10 @@ pub fn get_idx_val_map(domain: &Option<Domain>, con_index: &[SetVal]) -> IdxValM
             .parts
             .iter()
             .zip(con_index.iter().cloned())
-            .map(|(part, idx_val)| (part.var.clone(), idx_val))
+            .map(|(part, idx_val)| match &part.var {
+                DomainPartVar::Single(val) => (val.clone(), idx_val),
+                DomainPartVar::Tuple(_) => panic!("tuple domain part not valid in constraint def"),
+            })
             .collect()
     } else {
         HashMap::new()
@@ -387,15 +364,10 @@ fn expand_sum(
     lookups: &Lookups,
     idx_val_map: &IdxValMap,
 ) -> Expr {
-    domain_to_indexes(Some(sum_domain), lookups, Some(idx_val_map))
+    domain_to_indexes(sum_domain, lookups, Some(idx_val_map))
         .into_iter()
         .map(|idx| {
-            let mut idx_map: IdxValMap = sum_domain
-                .parts
-                .iter()
-                .zip(idx.iter().cloned())
-                .map(|(part, idx_val)| (part.var.clone(), idx_val))
-                .collect();
+            let mut idx_map = index_map_from_parts(&sum_domain.parts, &idx);
             idx_map.extend(idx_val_map.clone());
 
             substitute_vars(operand, &idx_map)
@@ -425,6 +397,7 @@ fn substitute_vars(expr: &Expr, con_index_vals: &IdxValMap) -> Expr {
                                     IndexShift::Plus => SetVal::Int(index_num + 1),
                                     IndexShift::Minus => SetVal::Int(index_num - 1),
                                 },
+                                SetVal::Vec(_) => panic!("tried to index shift on tuple index"),
                             },
                             None => s.clone(),
                         },
@@ -491,4 +464,65 @@ pub fn algebra(lhs: Vec<Term>, rhs: Vec<Term>) -> (Vec<Pair>, f64) {
     let rhs_total: f64 = [rhs_nums, lhs_nums_neg].into_iter().flatten().sum();
     let pairs = [lhs_pairs, rhs_pairs_neg].concat();
     (pairs, rhs_total)
+}
+
+fn index_map_from_parts(parts: &[DomainPart], idx: &[SetVal]) -> IdxValMap {
+    parts
+        .iter()
+        .zip(idx.iter().cloned())
+        .flat_map(|(part, idx_val)| -> Vec<(String, SetVal)> {
+            match (&part.var, idx_val) {
+                (DomainPartVar::Single(s), val) => vec![(s.clone(), val)],
+                (DomainPartVar::Tuple(vars), SetVal::Vec(vals)) => vars
+                    .iter()
+                    .zip(vals.iter())
+                    .map(|(v, sv)| {
+                        let set_val = match sv {
+                            SetValTerminal::Str(s) => SetVal::Str(s.clone()),
+                            SetValTerminal::Int(n) => SetVal::Int(*n),
+                        };
+                        (v.clone(), set_val)
+                    })
+                    .collect(),
+                _ => panic!("mismatched tuple/non-tuple indexes"),
+            }
+        })
+        .collect()
+}
+
+fn eval_func_minmax(
+    domain: &Domain,
+    is_min: bool,
+    lookups: &Lookups,
+    idx_val_map: &IdxValMap,
+) -> Vec<Term> {
+    // FuncMin looks like this:
+    // min{y in YEAR} min(y)
+    // Assumptions:
+    // - always only one dimension
+    // - always just getting the min of that set
+
+    // Only support min/maxing a single dimension
+    match domain.parts.first() {
+        Some(set_domain) => {
+            let concrete_set_keys: Vec<_> = set_domain
+                .idx
+                .iter()
+                .map(|k| idx_val_map.get(&k.var).unwrap().clone())
+                .collect();
+            let resolved = lookups
+                .set_map
+                .get(&set_domain.set)
+                .unwrap()
+                .resolve(&concrete_set_keys, lookups);
+            let iter = resolved.iter().map(|si| match si {
+                SetVal::Str(_) => panic!("cannot use func min/max on string index"),
+                SetVal::Int(num) => *num,
+                SetVal::Vec(_) => panic!("cannot use func min/max with tuple index"),
+            });
+            let val = if is_min { iter.min() } else { iter.max() }.unwrap();
+            vec![Term::Num(val as f64)]
+        }
+        None => panic!("no parts in func min/max domain"),
+    }
 }

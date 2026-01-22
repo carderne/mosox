@@ -50,7 +50,15 @@ param_default   =  { "default" ~ (expr | string_literal) }
 
 // Set
 // Example: set DAILYTIMEBRACKET;
-SET           = { "set" ~ id ~ ";" }
+SET             =  { "set" ~ id ~ set_domain? ~ set_condition? ~ (":=" ~ set_expr)? ~ ";" }
+// unlike `domain`, this doesn't allow a condition, and the "f in" part is optional
+set_domain      =  { "{" ~ (set_domain_part ~ ","?)+ ~ "}" }
+set_domain_part =  { (id ~ "in")? ~ domain_set }
+set_condition   =  { "within" ~ within_set ~ ("cross" ~ cross_set)? }
+within_set      = @{ id }
+cross_set       = @{ id }
+set_expr        =  { domain | set_math }
+set_math        =  { var_subscripted ~ ("inter" ~ var_subscripted)+ }
 
 // Constraint
 // Example: s.t. Capacity{r in REGION}: NewCap[r] = 2
@@ -102,8 +110,13 @@ data_entry = _{
 }
 
 // Data: Set
-DATA_SET   = { "set" ~ name ~ (":=" ~ set_val+)? ~ ";" }
+DATA_SET   = { "set" ~ id ~ set_index? ~ (":=" ~ set_assign)? ~ ";" }
+set_assign = { set_vals | set_tuples }
+set_tuples = { set_tuple+ }
+set_tuple  = { "(" ~ set_val ~ "," ~ set_val ~ ")" }
+set_vals   = { set_val+ }
 set_val    = { id | int }
+set_index  = { "[" ~ index ~ ("," ~ index)* ~ "]" }
 
 // Data: Param
 DATA_PARAM          =  {
@@ -131,10 +144,12 @@ param_data_any      =  { "*" }
 // Domain
 // example:
 // {r in REG, t in TECH:Capacity[r,t,y]<>0}
-domain      =  { "{" ~ (domain_part ~ ","?)+ ~ (":" ~ logic_expr)? ~ "}" }
-domain_part =  { domain_var ~ "in" ~ domain_set }
-domain_var  = @{ id }
-domain_set  = @{ id }
+domain             =  { "{" ~ (domain_part ~ ","?)+ ~ (":" ~ logic_expr)? ~ "}" }
+domain_part        =  { domain_var ~ "in" ~ domain_set ~ subscript? }
+domain_var         =  { domain_var_single | domain_var_tuple }
+domain_var_single  = @{ id }
+domain_var_tuple   = { "(" ~ id ~ ("," ~ id)+ ~ ")" }
+domain_set         = @{ id }
 
 // Logical expression
 // Expressions that evaluate to true or false

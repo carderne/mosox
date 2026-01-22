@@ -4,25 +4,25 @@ use crate::gmpl::Expr;
 use crate::gmpl::{ParamDataBody, ParamDataTarget, SetVal};
 use crate::model::ParamWithData;
 
-pub struct ParamCont {
-    pub data: ParamArr,
+pub struct Param {
+    pub data: ParamVal,
     pub default: Option<Expr>,
 }
-pub enum ParamArr {
+pub enum ParamVal {
     Arr(HashMap<Vec<SetVal>, f64>),
     Scalar(f64),
     Expr(Expr),
     None,
 }
 
-pub fn resolve_param(param: ParamWithData) -> ParamCont {
+pub fn resolve_param(param: ParamWithData) -> Param {
     let default = resolve_param_default(&param);
     if let Some(data) = param.data
         && let Some(body) = data.body
     {
         match body {
-            ParamDataBody::Num(num) => ParamCont {
-                data: ParamArr::Scalar(num),
+            ParamDataBody::Num(num) => Param {
+                data: ParamVal::Scalar(num),
                 default,
             },
             ParamDataBody::List(pairs) => {
@@ -30,8 +30,8 @@ pub fn resolve_param(param: ParamWithData) -> ParamCont {
                 for pair in pairs {
                     arr.insert(vec![pair.key], pair.value);
                 }
-                ParamCont {
-                    data: ParamArr::Arr(arr),
+                Param {
+                    data: ParamVal::Arr(arr),
                     default,
                 }
             }
@@ -63,20 +63,20 @@ pub fn resolve_param(param: ParamWithData) -> ParamCont {
                         }
                     }
                 }
-                ParamCont {
-                    data: ParamArr::Arr(arr),
+                Param {
+                    data: ParamVal::Arr(arr),
                     default,
                 }
             }
         }
     } else if let Some(expr) = param.decl.assign {
-        ParamCont {
-            data: ParamArr::Expr(expr),
+        Param {
+            data: ParamVal::Expr(expr),
             default,
         }
     } else {
-        ParamCont {
-            data: ParamArr::None,
+        Param {
+            data: ParamVal::None,
             default,
         }
     }

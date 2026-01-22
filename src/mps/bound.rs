@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::{
     gmpl,
-    mps::{BoundsMap, ColsMap, lookups::Lookups},
+    mps::{BoundsMap, ColsMap, lookup::Lookups},
 };
 
 pub fn gen_bounds(cols: &ColsMap, lookups: Lookups) -> BoundsMap {

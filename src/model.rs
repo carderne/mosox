@@ -7,13 +7,13 @@ use crate::gmpl::{Constraint, DataParam, DataSet, Entry, Objective, Param, Set, 
 #[derive(Clone, Debug)]
 pub struct SetWithData {
     pub decl: Set,
-    pub data: Option<DataSet>,
+    pub data: Vec<DataSet>,
 }
 
 impl fmt::Display for SetWithData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.decl)?;
-        if let Some(data) = &self.data {
+        for data in &self.data {
             write!(f, "\n  {}", data)?;
         }
         Ok(())
@@ -99,39 +99,30 @@ impl ModelWithData {
             }
         }
 
-        // Create lookup maps for matching
-        let mut set_map: HashMap<String, Set> = HashMap::new();
+        // Group data sets by name
+        let mut data_set_map: HashMap<String, Vec<DataSet>> = HashMap::new();
+        for data_set in data_sets {
+            data_set_map
+                .entry(data_set.name.clone())
+                .or_default()
+                .push(data_set);
+        }
+
+        // Match data sets to model sets
+        let mut matched_sets = Vec::new();
         for set in sets {
-            set_map.insert(set.name.clone(), set);
+            let data = data_set_map.remove(&set.name).unwrap_or_default();
+            matched_sets.push(SetWithData { decl: set, data });
+        }
+
+        // Check for orphaned data sets
+        if let Some((name, _)) = data_set_map.into_iter().next() {
+            panic!("Data set '{}' has no matching model declaration", name);
         }
 
         let mut param_map: HashMap<String, Param> = HashMap::new();
         for param in params {
             param_map.insert(param.name.clone(), param);
-        }
-
-        // Match data sets to model sets
-        let mut matched_sets = Vec::new();
-        for data_set in data_sets {
-            if let Some(set_decl) = set_map.remove(&data_set.name) {
-                matched_sets.push(SetWithData {
-                    decl: set_decl,
-                    data: Some(data_set),
-                });
-            } else {
-                panic!(
-                    "Data set '{}' has no matching model declaration",
-                    data_set.name
-                );
-            }
-        }
-
-        // Add remaining sets without data
-        for (_, set_decl) in set_map {
-            matched_sets.push(SetWithData {
-                decl: set_decl,
-                data: None,
-            });
         }
 
         // Match data params to model params

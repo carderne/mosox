@@ -1,8 +1,9 @@
-mod bounds;
+mod bound;
 mod constraints;
-mod lookups;
+mod lookup;
 pub mod output;
-mod params;
+mod param;
+mod set;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,11 +13,11 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::gmpl::{Constraint, Objective, SetVal};
 use crate::model::ModelWithData;
-use crate::mps::bounds::{Bounds, gen_bounds};
+use crate::mps::bound::{Bounds, gen_bounds};
 use crate::mps::constraints::{
     Pair, RowType, Term, algebra, domain_to_indexes, get_idx_val_map, recurse,
 };
-use crate::mps::lookups::Lookups;
+use crate::mps::lookup::Lookups;
 
 //                    var     var_index                 con     con_index       val
 type ColsMap =
@@ -108,7 +109,10 @@ fn build_constraints(constraints: Vec<Constraint>, lookups: &Lookups) -> Vec<Con
         .into_par_iter()
         .flat_map(|Constraint { name, domain, expr }| {
             let name = Arc::new(name);
-            domain_to_indexes(domain.as_ref(), lookups, None)
+            dbg!(&name);
+            domain
+                .as_ref()
+                .map_or(vec![], |d| domain_to_indexes(d, lookups, None))
                 .into_par_iter()
                 .map(|con_index| {
                     let con_index = Arc::new(con_index);

@@ -5,7 +5,7 @@ use std::fmt;
 
 use pest::iterators::Pair;
 
-use crate::grammar::Rule;
+use crate::{gmpl::atoms::VarSubscripted, grammar::Rule};
 pub use atoms::{Domain, RelOp};
 pub use expr::{Expr, LogicExpr};
 
@@ -151,19 +151,113 @@ impl fmt::Display for Param {
 #[derive(Clone, Debug)]
 pub struct Set {
     pub name: String,
+    pub dims: Vec<SetDomainPart>,
+    pub within: Option<String>,
+    pub cross: Option<String>,
+    pub expr: Option<SetExpr>,
 }
 
 impl Set {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
-        let mut pairs = entry.into_inner();
-        let name = pairs.next().unwrap().as_str().to_string();
-        Self { name }
+        let mut name = String::new();
+        let mut dims = Vec::new();
+        let mut within = None;
+        let mut cross = None;
+        let mut expr = None;
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::id => name = pair.as_str().to_string(),
+                Rule::set_domain => {
+                    for inner in pair.into_inner() {
+                        if inner.as_rule() == Rule::set_domain_part {
+                            dims.push(SetDomainPart::from_entry(inner));
+                        }
+                    }
+                }
+                Rule::set_condition => {
+                    for inner in pair.into_inner() {
+                        match inner.as_rule() {
+                            Rule::within_set => within = Some(inner.as_str().to_string()),
+                            Rule::cross_set => cross = Some(inner.as_str().to_string()),
+                            _ => {}
+                        }
+                    }
+                }
+                Rule::set_expr => expr = Some(SetExpr::from_entry(pair)),
+                _ => {}
+            }
+        }
+
+        Self {
+            name,
+            dims,
+            within,
+            cross,
+            expr,
+        }
     }
 }
 
 impl fmt::Display for Set {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "set {}", self.name)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SetDomainPart {
+    pub id: String,
+    pub set: String,
+}
+
+impl SetDomainPart {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let mut id = String::new();
+        let mut set = String::new();
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::id => id = pair.as_str().to_string(),
+                Rule::domain_set => set = pair.as_str().to_string(),
+                _ => {}
+            }
+        }
+
+        Self { id, set }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum SetExpr {
+    Domain(Domain),
+    SetMath(SetMath),
+}
+
+impl SetExpr {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let inner = entry.into_inner().next().unwrap();
+        match inner.as_rule() {
+            Rule::domain => SetExpr::Domain(Domain::from_entry(inner)),
+            Rule::set_math => SetExpr::SetMath(SetMath::from_entry(inner)),
+            _ => unreachable!("Unexpected rule in set_expr: {:?}", inner.as_rule()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SetMath {
+    pub intersection: Vec<VarSubscripted>,
+}
+
+impl SetMath {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let intersection = entry
+            .into_inner()
+            .filter(|p| p.as_rule() == Rule::var_subscripted)
+            .map(VarSubscripted::from_entry)
+            .collect();
+        Self { intersection }
     }
 }
 
@@ -249,23 +343,86 @@ impl fmt::Display for Constraint {
 #[derive(Clone, Debug)]
 pub struct DataSet {
     pub name: String,
+    pub index: Vec<SetVal>,
     pub values: Vec<SetVal>,
 }
 
 impl DataSet {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
         let mut name = String::new();
+        let mut index = Vec::new();
         let mut values = Vec::new();
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::name => name = pair.as_str().to_string(),
-                Rule::set_val => values.push(SetVal::from_entry(pair)),
+                Rule::id => name = pair.as_str().to_string(),
+                Rule::set_index => {
+                    for inner in pair.into_inner() {
+                        if inner.as_rule() == Rule::index {
+                            // Extract the index_var from each index
+                            for idx_part in inner.into_inner() {
+                                if idx_part.as_rule() == Rule::index_var {
+                                    let raw = idx_part.as_str();
+                                    let val = raw
+                                        .parse::<u64>()
+                                        .map(SetVal::Int)
+                                        .unwrap_or_else(|_| SetVal::Str(raw.to_string()));
+                                    index.push(val);
+                                }
+                            }
+                        }
+                    }
+                }
+                Rule::set_assign => {
+                    for inner in pair.into_inner() {
+                        match inner.as_rule() {
+                            Rule::set_vals => {
+                                // Simple values: push each directly
+                                for val in inner.into_inner() {
+                                    if val.as_rule() == Rule::set_val {
+                                        values.push(SetVal::from_entry(val));
+                                    }
+                                }
+                            }
+                            Rule::set_tuples => {
+                                // Tuples: wrap in SetVal::Vec with SetValTerminal
+                                for tuple in inner.into_inner() {
+                                    if tuple.as_rule() == Rule::set_tuple {
+                                        let tuple_vals: Vec<SetValTerminal> = tuple
+                                            .into_inner()
+                                            .filter(|p| p.as_rule() == Rule::set_val)
+                                            .map(|p| {
+                                                let inner = p.into_inner().next().unwrap();
+                                                match inner.as_rule() {
+                                                    Rule::id => SetValTerminal::Str(
+                                                        inner.as_str().to_string(),
+                                                    ),
+                                                    Rule::int => SetValTerminal::Int(
+                                                        inner.as_str().parse().unwrap_or(0),
+                                                    ),
+                                                    _ => SetValTerminal::Str(
+                                                        inner.as_str().to_string(),
+                                                    ),
+                                                }
+                                            })
+                                            .collect();
+                                        values.push(SetVal::Vec(tuple_vals));
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 _ => {}
             }
         }
 
-        Self { name, values }
+        Self {
+            name,
+            index,
+            values,
+        }
     }
 }
 
@@ -527,6 +684,13 @@ impl fmt::Display for ParamCondition {
 pub enum SetVal {
     Str(String),
     Int(u64),
+    Vec(Vec<SetValTerminal>),
+}
+
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+pub enum SetValTerminal {
+    Str(String),
+    Int(u64),
 }
 
 impl SetVal {
@@ -540,28 +704,22 @@ impl SetVal {
     }
 }
 
-impl Ord for SetVal {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (SetVal::Int(a), SetVal::Int(b)) => a.cmp(b),
-            (SetVal::Str(a), SetVal::Str(b)) => a.cmp(b),
-            (SetVal::Int(_), SetVal::Str(_)) => std::cmp::Ordering::Less,
-            (SetVal::Str(_), SetVal::Int(_)) => std::cmp::Ordering::Greater,
-        }
-    }
-}
-
-impl PartialOrd for SetVal {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl fmt::Display for SetVal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             SetVal::Str(s) => write!(f, "{}", s),
             SetVal::Int(n) => write!(f, "{}", n),
+            // TODO don't do debug format
+            SetVal::Vec(v) => write!(f, "{:?}", v),
+        }
+    }
+}
+
+impl fmt::Display for SetValTerminal {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SetValTerminal::Str(s) => write!(f, "{}", s),
+            SetValTerminal::Int(n) => write!(f, "{}", n),
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
     gmpl::SetVal,
-    mps::{BoundsMap, ColsMap, Compiled, RowsMap, bounds::BoundsOp},
+    mps::{BoundsMap, ColsMap, Compiled, RowsMap, bound::BoundsOp},
 };
 
 pub fn print_mps(compiled: Compiled, model_name: &str) {

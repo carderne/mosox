@@ -41,7 +41,7 @@ impl Domain {
 impl fmt::Display for Domain {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{{")?;
-        let vars: Vec<_> = self.parts.iter().map(|p| p.var.as_str()).collect();
+        let vars: Vec<_> = self.parts.iter().map(|p| p.var.to_string()).collect();
         write!(f, "{}", vars.join(", "))?;
         if self.condition.is_some() {
             write!(f, ": <condition>")?;
@@ -53,30 +53,66 @@ impl fmt::Display for Domain {
 /// Single domain part (e.g., "r in REGION")
 #[derive(Clone, Debug)]
 pub struct DomainPart {
-    pub var: String,
+    pub var: DomainPartVar,
+    pub idx: Vec<Index>,
     pub set: String,
 }
 
 impl DomainPart {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
-        let mut var = String::new();
+        let mut var = DomainPartVar::Single(String::new());
+        let mut idx = Vec::new();
         let mut set = String::new();
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::domain_var => var = pair.as_str().to_string(),
+                Rule::domain_var => {
+                    let inner = pair.into_inner().next().unwrap();
+                    var = match inner.as_rule() {
+                        Rule::domain_var_single => {
+                            DomainPartVar::Single(inner.as_str().to_string())
+                        }
+                        Rule::domain_var_tuple => {
+                            let ids: Vec<String> = inner
+                                .into_inner()
+                                .filter(|p| p.as_rule() == Rule::id)
+                                .map(|p| p.as_str().to_string())
+                                .collect();
+                            DomainPartVar::Tuple(ids)
+                        }
+                        _ => unreachable!(),
+                    };
+                }
+                Rule::subscript => {
+                    idx = Subscript::from_entry(pair).indices;
+                }
                 Rule::domain_set => set = pair.as_str().to_string(),
                 _ => {}
             }
         }
 
-        Self { var, set }
+        Self { var, idx, set }
     }
 }
 
 impl fmt::Display for DomainPart {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} in {}", self.var, self.set)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum DomainPartVar {
+    Single(String),
+    Tuple(Vec<String>),
+}
+
+impl fmt::Display for DomainPartVar {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DomainPartVar::Single(s) => write!(f, "{}", s),
+            DomainPartVar::Tuple(v) => write!(f, "({})", v.join(", ")),
+        }
     }
 }
 
