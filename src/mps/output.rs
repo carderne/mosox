@@ -38,11 +38,9 @@ fn print_rhs(rows: &RowsMap) {
     for ((name, idx), (_, val)) in rows {
         // MPS format assumes RHS is 0 if not provided
         // NB: -0 and +0 are different values
-        if let Some(num) = val
-            && *num != 0.0
-        {
+        if *val != 0.0 {
             let idx = format_index_vals(idx);
-            println!(" RHS1 {name}{idx} {num}");
+            println!(" RHS1 {name}{idx} {val}");
         }
     }
 }

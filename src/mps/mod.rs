@@ -15,7 +15,7 @@ use crate::gmpl::{Constraint, Objective, SetVal};
 use crate::model::ModelWithData;
 use crate::mps::bound::{Bounds, gen_bounds};
 use crate::mps::constraints::{
-    Pair, RowType, Term, algebra, domain_to_indexes, get_idx_val_map, recurse,
+    Pair, RowType, algebra, domain_to_indexes, get_idx_val_map, recurse,
 };
 use crate::mps::lookup::Lookups;
 
@@ -23,7 +23,7 @@ use crate::mps::lookup::Lookups;
 type ColsMap =
     IndexMap<(Arc<String>, Arc<Vec<SetVal>>), IndexMap<(Arc<String>, Arc<Vec<SetVal>>), f64>>;
 //                      con     con_index        type     rhs
-type RowsMap = IndexMap<(Arc<String>, Arc<Vec<SetVal>>), (RowType, Option<f64>)>;
+type RowsMap = IndexMap<(Arc<String>, Arc<Vec<SetVal>>), (RowType, f64)>;
 //                      var     var_index       bounds
 type BoundsMap = IndexMap<(Arc<String>, Arc<Vec<SetVal>>), Arc<Bounds>>;
 
@@ -37,7 +37,7 @@ struct Con {
     name: Arc<String>,
     idx: Arc<Vec<SetVal>>,
     row_type: RowType,
-    rhs: Option<f64>,
+    rhs: f64,
     pairs: Vec<Pair>,
 }
 
@@ -86,20 +86,16 @@ fn build_cols_and_rows(cons: Vec<Con>) -> (ColsMap, RowsMap) {
 }
 
 fn build_objective_constraint(objective: Objective, lookups: &Lookups) -> Con {
-    let pairs = recurse(&objective.expr, lookups, &HashMap::new())
-        .into_iter()
-        .map(|term| match term {
-            Term::Num(_) => panic!("unhandled: objective function has a const in it"),
-            Term::Pair(pair) => pair,
-        })
-        .collect();
+    let pairs = recurse(&objective.expr, lookups, &HashMap::new());
+
+    let (pairs, rhs) = algebra(pairs, vec![]);
 
     Con {
         name: Arc::new(objective.name),
         // Objective is always "singular": it has no domain
         idx: Arc::new(vec![]),
         row_type: RowType::N,
-        rhs: None,
+        rhs,
         pairs,
     }
 }
@@ -124,7 +120,7 @@ fn build_constraints(constraints: Vec<Constraint>, lookups: &Lookups) -> Vec<Con
                         name: name.clone(),
                         idx: con_index,
                         row_type: RowType::from_rel_op(&expr.op),
-                        rhs: Some(rhs_total),
+                        rhs: rhs_total,
                         pairs,
                     }
                 })

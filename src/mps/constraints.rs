@@ -21,6 +21,9 @@ pub struct Pair {
 pub enum Term {
     Num(f64),
     Pair(Pair),
+    // This is a special case only used in domain conditions
+    // to eg check two domain indexes are the same
+    Str(String),
 }
 
 //                       index   index value
@@ -95,7 +98,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                 // Use the current index value (eg y=>2014) as an actual value
                 // Mostly (only?) used in domain condition expressions
                 match index_val {
-                    SetVal::Str(_) => panic!("cannot use a string SetIndex here"),
+                    SetVal::Str(val) => vec![Term::Str(val.clone())],
                     SetVal::Int(num) => vec![Term::Num(*num as f64)],
                     SetVal::Vec(_) => panic!("tuple set not allowed in var subscript"),
                 }
@@ -110,8 +113,14 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
             let new_expr = expand_sum(&func.operand, &func.domain, lookups, idx_val_map);
             recurse(&new_expr, lookups, idx_val_map)
         }
-        Expr::FuncMin(func) => eval_func_minmax(&func.domain, true, lookups, idx_val_map),
-        Expr::FuncMax(func) => eval_func_minmax(&func.domain, false, lookups, idx_val_map),
+        Expr::FuncMin(func) => {
+            let val = eval_func_minmax(&func.domain, true, lookups, idx_val_map);
+            vec![Term::Num(val)]
+        }
+        Expr::FuncMax(func) => {
+            let val = eval_func_minmax(&func.domain, false, lookups, idx_val_map);
+            vec![Term::Num(val)]
+        }
         Expr::Conditional(conditional) => {
             let default;
             let expr: &Expr =
@@ -131,6 +140,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
             terms
                 .into_iter()
                 .map(|t| match t {
+                    Term::Str(_) => panic!("Cannot unary neg a string term"),
                     Term::Num(n) => Term::Num(-n),
                     Term::Pair(p) => Term::Pair(Pair {
                         coeff: -p.coeff,
@@ -175,6 +185,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                     (None, Some(num)) => lhs
                         .into_iter()
                         .map(|p| match p {
+                            Term::Str(_) => panic!("Cannot do math on a string term"),
                             Term::Num(inner) => Term::Num(inner - num),
                             Term::Pair(pair) => Term::Pair(Pair {
                                 coeff: pair.coeff - num,
@@ -192,6 +203,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                         terms
                             .into_iter()
                             .map(|p| match p {
+                                Term::Str(_) => panic!("Cannot do math on a string term"),
                                 Term::Num(inner) => Term::Num(inner * num),
                                 Term::Pair(pair) => Term::Pair(Pair {
                                     coeff: pair.coeff * num,
@@ -208,6 +220,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                     (None, Some(num)) => lhs
                         .into_iter()
                         .map(|p| match p {
+                            Term::Str(_) => panic!("Cannot do math on a string term"),
                             Term::Num(inner) => Term::Num(inner / num),
                             Term::Pair(pair) => Term::Pair(Pair {
                                 coeff: pair.coeff / num,
@@ -280,7 +293,6 @@ pub fn domain_to_indexes(
                 .get(&p.set)
                 .unwrap()
                 .resolve(&concrete_set_keys, lookups)
-                .clone()
         })
         .multi_cartesian_product()
         .filter_map(|idx| match &condition {
@@ -331,11 +343,11 @@ fn check_domain_condition(logic: &LogicExpr, lookups: &Lookups, idx_val_map: &Id
             let rhs = recurse(rhs, lookups, idx_val_map);
 
             // no algebra allowed here!
-            let lhs_num = resolve_terms_to_num(&lhs);
-            let rhs_num = resolve_terms_to_num(&rhs);
+            let lhs_num = resolve_terms_to_term(&lhs);
+            let rhs_num = resolve_terms_to_term(&rhs);
 
             match (lhs_num, rhs_num) {
-                (Some(lhs), Some(rhs)) => match op {
+                (Term::Num(lhs), Term::Num(rhs)) => match op {
                     RelOp::Eq => lhs == rhs,
                     RelOp::Ne => lhs != rhs,
                     RelOp::Gt => lhs > rhs,
@@ -344,7 +356,12 @@ fn check_domain_condition(logic: &LogicExpr, lookups: &Lookups, idx_val_map: &Id
                     RelOp::Le => lhs <= rhs,
                     _ => panic!("unhandled logic expr: {}", logic),
                 },
-                _ => panic!("no vars allowed in domain conditions"),
+                (Term::Str(lhs), Term::Str(rhs)) => match op {
+                    RelOp::Eq => lhs == rhs,
+                    RelOp::Ne => lhs != rhs,
+                    _ => panic!("unhandled logic expr: {}", logic),
+                },
+                _ => panic!("vars or mixed terms in domain condition"),
             }
         }
         LogicExpr::BoolOp { lhs, op, rhs } => {
@@ -370,7 +387,7 @@ fn expand_sum(
             let mut idx_map = index_map_from_parts(&sum_domain.parts, &idx);
             idx_map.extend(idx_val_map.clone());
 
-            substitute_vars(operand, &idx_map)
+            substitute_vars(operand, lookups, &idx_map)
         })
         .reduce(|acc, expr| Expr::BinOp {
             lhs: Box::new(acc),
@@ -380,14 +397,14 @@ fn expand_sum(
         .unwrap_or(Expr::Number(0.0))
 }
 
-fn substitute_vars(expr: &Expr, con_index_vals: &IdxValMap) -> Expr {
+fn substitute_vars(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Expr {
     match expr {
         Expr::VarSubscripted(vs) => {
             if let Some(subscript) = &vs.subscript {
                 let concrete: Vec<SetVal> = subscript
                     .indices
                     .iter()
-                    .map(|i| match con_index_vals.get(&i.var) {
+                    .map(|i| match idx_val_map.get(&i.var) {
                         Some(s) => match &i.shift {
                             Some(shift) => match s {
                                 SetVal::Str(_) => {
@@ -414,21 +431,50 @@ fn substitute_vars(expr: &Expr, con_index_vals: &IdxValMap) -> Expr {
             Expr::VarSubscripted(vs.clone())
         }
         Expr::BinOp { lhs, op, rhs } => Expr::BinOp {
-            lhs: Box::new(substitute_vars(lhs, con_index_vals)),
+            lhs: Box::new(substitute_vars(lhs, lookups, idx_val_map)),
             op: *op,
-            rhs: Box::new(substitute_vars(rhs, con_index_vals)),
+            rhs: Box::new(substitute_vars(rhs, lookups, idx_val_map)),
         },
         Expr::Number(n) => Expr::Number(*n),
-        Expr::UnaryNeg(inner) => Expr::UnaryNeg(Box::new(substitute_vars(inner, con_index_vals))),
+        Expr::UnaryNeg(inner) => {
+            // TODO need to be negated?
+            Expr::UnaryNeg(Box::new(substitute_vars(inner, lookups, idx_val_map)))
+        }
+        Expr::FuncSum(func) => expand_sum(&func.operand, &func.domain, lookups, idx_val_map),
+        Expr::FuncMin(func) => {
+            let val = eval_func_minmax(&func.domain, true, lookups, idx_val_map);
+            Expr::Number(val)
+        }
+        Expr::FuncMax(func) => {
+            let val = eval_func_minmax(&func.domain, false, lookups, idx_val_map);
+            Expr::Number(val)
+        }
         _ => panic!("expr not supported in substition: {}", &expr),
     }
 }
 
 fn resolve_terms_to_num(terms: &[Term]) -> Option<f64> {
     terms.iter().try_fold(0.0, |acc, t| match t {
+        Term::Str(_) => panic!("Cannot do math on a string term"),
         Term::Num(num) => Some(acc + num),
         Term::Pair(_) => None,
     })
+}
+
+fn resolve_terms_to_term(terms: &[Term]) -> Term {
+    if terms.is_empty() {
+        panic!("empty domain condition on one side");
+    }
+
+    match &terms[0] {
+        Term::Str(s) => Term::Str(s.clone()),
+        Term::Pair(_) => panic!("Cannot have variables in final domain condition check"),
+        Term::Num(_) => Term::Num(terms.iter().fold(0.0, |acc, t| match t {
+            Term::Str(_) => panic!("mixed term types"),
+            Term::Num(num) => acc + num,
+            Term::Pair(_) => panic!("mixed term types"),
+        })),
+    }
 }
 
 pub fn algebra(lhs: Vec<Term>, rhs: Vec<Term>) -> (Vec<Pair>, f64) {
@@ -495,7 +541,7 @@ fn eval_func_minmax(
     is_min: bool,
     lookups: &Lookups,
     idx_val_map: &IdxValMap,
-) -> Vec<Term> {
+) -> f64 {
     // FuncMin looks like this:
     // min{y in YEAR} min(y)
     // Assumptions:
@@ -521,7 +567,7 @@ fn eval_func_minmax(
                 SetVal::Vec(_) => panic!("cannot use func min/max with tuple index"),
             });
             let val = if is_min { iter.min() } else { iter.max() }.unwrap();
-            vec![Term::Num(val as f64)]
+            val as f64
         }
         None => panic!("no parts in func min/max domain"),
     }
