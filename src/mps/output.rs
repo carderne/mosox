@@ -38,7 +38,7 @@ fn print_rhs(rows: &RowsMap) {
     for ((name, idx), (row_type, val)) in rows {
         // Skip N-type rows (objective function) - they should never have RHS
         // TODO: why were these getting printed? Small 0.00.. value?
-        if *row_type == RowType::N {
+        if **row_type == RowType::N {
             continue;
         }
         // MPS format assumes RHS is 0 if not provided
