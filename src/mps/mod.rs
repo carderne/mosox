@@ -11,8 +11,7 @@ use std::sync::Arc;
 use indexmap::IndexMap;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-use crate::gmpl::atoms::Index;
-use crate::gmpl::{Constraint, ConstraintExpr, Domain, Expr, Objective};
+use crate::gmpl::{Constraint, ConstraintExpr, Domain, Expr, Index, Objective};
 use crate::model::ModelWithData;
 use crate::mps::bound::{Bounds, gen_bounds};
 use crate::mps::constraints::{Pair, RowType, algebra, domain_to_indexes, get_index_map, recurse};

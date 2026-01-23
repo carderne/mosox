@@ -2,14 +2,14 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::gmpl::LogicExpr;
-use crate::gmpl::atoms::{
-    BoolOp, Domain, DomainPart, DomainPartVar, Index, RelOp, SetVal, SetValTerminal, Subscript,
-    SubscriptShift,
+use crate::gmpl::{
+    BoolOp, Domain, DomainPart, DomainPartVar, Expr, Index, MathOp, RelOp, SetVal, SetValTerminal,
+    Subscript, SubscriptShift,
 };
-use crate::gmpl::{Expr, atoms::MathOp};
 use crate::mps::lookup::Lookups;
 use crate::mps::param::ParamVal;
 use itertools::Itertools;
+use lasso::Spur;
 use ref_cast::RefCast;
 
 #[derive(Clone, Debug)]
@@ -25,7 +25,7 @@ pub enum Term {
     Pair(Pair),
     // This is a special case only used in domain conditions
     // to eg check two domain indexes are the same
-    Str(String),
+    Str(Spur),
 }
 
 //                       index   index value
@@ -72,7 +72,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                 // Use the current index value (eg y=>2014) as an actual value
                 // Mostly (only?) used in domain condition expressions
                 match index_val {
-                    SetVal::Str(val) => vec![Term::Str(val.clone())],
+                    SetVal::Str(val) => vec![Term::Str(*val)],
                     SetVal::Int(num) => vec![Term::Num(*num as f64)],
                     SetVal::Vec(_) => panic!("tuple set not allowed in var subscript"),
                 }
@@ -377,7 +377,7 @@ fn resolve_terms_to_term(terms: &[Term]) -> Term {
     }
 
     match &terms[0] {
-        Term::Str(s) => Term::Str(s.clone()),
+        Term::Str(s) => Term::Str(*s),
         Term::Pair(pair) => panic!(
             "Cannot have variables in final domain condition check: {:?}",
             pair
@@ -443,7 +443,7 @@ pub fn get_index_map(parts: &[DomainPart], idx: &Index) -> IdxValMap {
                     .zip(vals.iter())
                     .map(|(v, sv)| {
                         let set_val = match sv {
-                            SetValTerminal::Str(s) => SetVal::Str(s.clone()),
+                            SetValTerminal::Str(s) => SetVal::Str(*s),
                             SetValTerminal::Int(n) => SetVal::Int(*n),
                         };
                         (v.clone(), set_val)

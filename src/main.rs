@@ -56,6 +56,7 @@ fn main() -> ExitCode {
 
             let t0 = Instant::now();
             let model = check(path, data_path, &false).unwrap();
+
             eprintln!("load: {:?}", t0.elapsed());
 
             let t1 = Instant::now();

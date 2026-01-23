@@ -1,10 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    gmpl::{
-        self, SetData, SetExpr,
-        atoms::{Index, SetVal, SetVals},
-    },
+    gmpl::{self, Index, SetData, SetExpr, SetVal, SetVals},
     model::SetWithData,
     mps::{constraints::domain_to_indexes, lookup::Lookups},
 };

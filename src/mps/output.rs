@@ -1,6 +1,5 @@
-use crate::{
-    gmpl::atoms::Index,
-    mps::{BoundsMap, ColsMap, Compiled, RowsMap, bound::BoundsOp, constraints::RowType},
+use crate::mps::{
+    BoundsMap, ColsMap, Compiled, Index, RowsMap, bound::BoundsOp, constraints::RowType,
 };
 
 pub fn print_mps(compiled: Compiled, model_name: &str) {

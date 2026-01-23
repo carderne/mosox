@@ -1,16 +1,36 @@
-pub mod atoms;
-mod expr;
-
 use std::fmt;
+use std::ops::Deref;
+use std::sync::LazyLock;
 
+use lasso::Spur;
+use lasso::ThreadedRodeo;
 use pest::iterators::Pair;
+use pest::iterators::Pairs;
+use pest::pratt_parser::{Assoc::*, Op, PrattParser};
+use ref_cast::RefCast;
 
-use crate::{
-    gmpl::atoms::{Index, SetVal, SetValTerminal, SetVals, VarSubscripted},
-    grammar::Rule,
-};
-pub use atoms::{Domain, RelOp};
-pub use expr::{Expr, LogicExpr};
+use crate::grammar::Rule;
+
+static PRATT_PARSER: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
+    PrattParser::new()
+        // Precedence lowest to highest (per GMPL spec)
+        .op(Op::infix(Rule::add, Left) | Op::infix(Rule::sub, Left))
+        .op(Op::prefix(Rule::sum_prefix)) // iterated ops: between add/sub and mul/div
+        .op(Op::infix(Rule::mul, Left) | Op::infix(Rule::div, Left))
+        .op(Op::prefix(Rule::neg))
+        .op(Op::infix(Rule::pow, Right))
+});
+
+pub static INTERNER: LazyLock<ThreadedRodeo> = LazyLock::new(ThreadedRodeo::default);
+
+// Intern a string (thread-safe)
+fn intern(s: &str) -> Spur {
+    INTERNER.get_or_intern(s)
+}
+
+pub fn resolve(spur: Spur) -> &'static str {
+    INTERNER.resolve(&spur)
+}
 
 // ==============================
 // ROOT RULES
@@ -387,15 +407,15 @@ impl SetData {
                                             .map(|p| {
                                                 let inner = p.into_inner().next().unwrap();
                                                 match inner.as_rule() {
-                                                    Rule::id => SetValTerminal::Str(
-                                                        inner.as_str().to_string(),
-                                                    ),
+                                                    Rule::id => {
+                                                        SetValTerminal::Str(intern(inner.as_str()))
+                                                    }
                                                     Rule::int => SetValTerminal::Int(
                                                         inner.as_str().parse().unwrap_or(0),
                                                     ),
-                                                    _ => SetValTerminal::Str(
-                                                        inner.as_str().to_string(),
-                                                    ),
+                                                    _ => {
+                                                        SetValTerminal::Str(intern(inner.as_str()))
+                                                    }
                                                 }
                                             })
                                             .collect();
@@ -442,9 +462,9 @@ impl ParamDataPair {
         let mut tokens = entry.into_inner();
         let key = tokens.next().unwrap().as_str();
         let key = key
-            .parse::<u64>()
+            .parse::<u32>()
             .map(SetVal::Int)
-            .unwrap_or_else(|_| SetVal::Str(key.to_string()));
+            .unwrap_or_else(|_| SetVal::Str(intern(key)));
         let value = tokens.next().unwrap().as_str().parse().unwrap();
         Self { key, value }
     }
@@ -706,9 +726,9 @@ impl ParamDataTable {
                         if inner.as_rule() == Rule::set_val {
                             let raw = inner.as_str();
                             let col = raw
-                                .parse::<u64>()
+                                .parse::<u32>()
                                 .map(SetVal::Int)
-                                .unwrap_or_else(|_| SetVal::Str(raw.to_string()));
+                                .unwrap_or_else(|_| SetVal::Str(intern(raw)));
                             cols.push(col);
                         }
                     }
@@ -765,9 +785,9 @@ impl ParamDataRow {
                     if label.is_none() {
                         let raw = pair.as_str();
                         label = Some(
-                            raw.parse::<u64>()
+                            raw.parse::<u32>()
                                 .map(SetVal::Int)
-                                .unwrap_or_else(|_| SetVal::Str(raw.to_string())),
+                                .unwrap_or_else(|_| SetVal::Str(intern(raw))),
                         );
                     }
                 }
@@ -823,5 +843,705 @@ impl fmt::Display for Entry {
             Entry::DataSet(ds) => write!(f, "{}", ds),
             Entry::DataParam(dp) => write!(f, "{}", dp),
         }
+    }
+}
+
+/// Expression - recursive tree structure with proper operator precedence
+#[derive(Clone, Debug)]
+pub enum Expr {
+    Number(f64),
+    VarSubscripted(VarSubscripted),
+    FuncSum(Box<FuncSum>),
+    FuncMin(Box<FuncMin>),
+    FuncMax(Box<FuncMax>),
+    Conditional(Box<Conditional>),
+    UnaryNeg(Box<Expr>),
+    BinOp {
+        lhs: Box<Expr>,
+        op: MathOp,
+        rhs: Box<Expr>,
+    },
+}
+
+impl Expr {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        parse_expr(entry.into_inner())
+    }
+}
+
+/// Parse expression using Pratt parser for correct precedence
+pub fn parse_expr(pairs: Pairs<Rule>) -> Expr {
+    PRATT_PARSER
+        .map_primary(|primary| match primary.as_rule() {
+            Rule::number => Expr::Number(primary.as_str().parse().unwrap_or(0.0)),
+            Rule::var_subscripted => Expr::VarSubscripted(VarSubscripted::from_entry(primary)),
+            Rule::func_min => Expr::FuncMin(Box::new(FuncMin::from_entry(primary))),
+            Rule::func_max => Expr::FuncMax(Box::new(FuncMax::from_entry(primary))),
+            Rule::conditional => Expr::Conditional(Box::new(Conditional::from_entry(primary))),
+            Rule::expr => parse_expr(primary.into_inner()),
+            rule => unreachable!("Expected primary, found {:?}", rule),
+        })
+        .map_prefix(|op, rhs| match op.as_rule() {
+            Rule::neg => Expr::UnaryNeg(Box::new(rhs)),
+            Rule::sum_prefix => {
+                // Extract domain from sum_prefix
+                let domain = op
+                    .into_inner()
+                    .find(|p| p.as_rule() == Rule::domain)
+                    .map(Domain::from_entry)
+                    .expect("sum_prefix must have domain");
+                Expr::FuncSum(Box::new(FuncSum {
+                    domain,
+                    operand: Box::new(rhs),
+                }))
+            }
+            rule => unreachable!("Expected prefix op, found {:?}", rule),
+        })
+        .map_infix(|lhs, op, rhs| {
+            let op = match op.as_rule() {
+                Rule::add => MathOp::Add,
+                Rule::sub => MathOp::Sub,
+                Rule::mul => MathOp::Mul,
+                Rule::div => MathOp::Div,
+                Rule::pow => MathOp::Pow,
+                rule => unreachable!("Expected infix op, found {:?}", rule),
+            };
+            Expr::BinOp {
+                lhs: Box::new(lhs),
+                op,
+                rhs: Box::new(rhs),
+            }
+        })
+        .parse(pairs)
+}
+
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Expr::Number(n) => write!(f, "{}", n),
+            Expr::VarSubscripted(v) => write!(f, "{}", v),
+            Expr::FuncSum(func) => write!(f, "{}", **func),
+            Expr::FuncMin(func) => write!(f, "{}", **func),
+            Expr::FuncMax(func) => write!(f, "{}", **func),
+            Expr::Conditional(cond) => write!(f, "{}", **cond),
+            Expr::UnaryNeg(e) => write!(f, "-{}", **e),
+            Expr::BinOp { lhs, op, rhs } => write!(f, "({} {} {})", **lhs, op, **rhs),
+        }
+    }
+}
+
+static LOGIC_PRATT: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
+    PrattParser::new()
+        // Precedence: and > or (standard convention)
+        .op(Op::infix(Rule::bool_or, Left))
+        .op(Op::infix(Rule::bool_and, Left))
+});
+
+/// Logical expression - recursive tree structure with proper operator precedence
+#[derive(Clone, Debug)]
+pub enum LogicExpr {
+    Comparison {
+        lhs: Expr,
+        op: RelOp,
+        rhs: Expr,
+    },
+    BoolOp {
+        lhs: Box<LogicExpr>,
+        op: BoolOp,
+        rhs: Box<LogicExpr>,
+    },
+}
+
+impl LogicExpr {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        parse_logic_expr(entry.into_inner())
+    }
+}
+
+/// Parse logical expression using Pratt parser for correct precedence
+fn parse_logic_expr(pairs: Pairs<Rule>) -> LogicExpr {
+    LOGIC_PRATT
+        .map_primary(|primary| match primary.as_rule() {
+            Rule::comparison => {
+                let mut inner = primary.into_inner();
+                let lhs = Expr::from_entry(inner.next().unwrap());
+                let op = RelOp::from_entry(inner.next().unwrap());
+                let rhs = Expr::from_entry(inner.next().unwrap());
+                LogicExpr::Comparison { lhs, op, rhs }
+            }
+            Rule::logic_compound => {
+                let inner = primary.into_inner().next().unwrap();
+                parse_logic_expr(inner.into_inner())
+            }
+            Rule::logic_expr => parse_logic_expr(primary.into_inner()),
+            rule => unreachable!("Expected logic primary, found {:?}", rule),
+        })
+        .map_infix(|lhs, op, rhs| {
+            let op = match op.as_rule() {
+                Rule::bool_and => BoolOp::And,
+                Rule::bool_or => BoolOp::Or,
+                rule => unreachable!("Expected bool op, found {:?}", rule),
+            };
+            LogicExpr::BoolOp {
+                lhs: Box::new(lhs),
+                op,
+                rhs: Box::new(rhs),
+            }
+        })
+        .parse(pairs)
+}
+
+impl fmt::Display for LogicExpr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            LogicExpr::Comparison { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
+            LogicExpr::BoolOp { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
+        }
+    }
+}
+
+/// Conditional expression (if-then-else)
+#[derive(Clone, Debug)]
+pub struct Conditional {
+    pub condition: LogicExpr,
+    pub then_expr: Box<Expr>,
+    pub else_expr: Option<Box<Expr>>,
+}
+
+impl Conditional {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let mut condition = None;
+        let mut then_expr = None;
+        let mut else_expr = None;
+
+        let inner: Vec<_> = entry.into_inner().collect();
+        let mut i = 0;
+        while i < inner.len() {
+            let pair = &inner[i];
+            match pair.as_rule() {
+                Rule::logic_expr => condition = Some(LogicExpr::from_entry(pair.clone())),
+                Rule::expr => {
+                    if then_expr.is_none() {
+                        then_expr = Some(Box::new(Expr::from_entry(pair.clone())));
+                    } else {
+                        else_expr = Some(Box::new(Expr::from_entry(pair.clone())));
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+
+        Self {
+            condition: condition.unwrap(),
+            then_expr: then_expr.unwrap(),
+            else_expr,
+        }
+    }
+}
+
+impl fmt::Display for Conditional {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "if {} then {}", self.condition, self.then_expr)?;
+        if let Some(else_expr) = &self.else_expr {
+            write!(f, " else {}", else_expr)?;
+        }
+        Ok(())
+    }
+}
+
+// ==============================
+// CHILD STRUCTS
+// ==============================
+
+/// Set val (identifier or positive integer)
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+pub enum SetVal {
+    Str(Spur),
+    Int(u32),
+    Vec(Vec<SetValTerminal>),
+}
+
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+pub enum SetValTerminal {
+    Str(Spur),
+    Int(u32),
+}
+
+impl SetVal {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let inner = entry.into_inner().next().unwrap();
+        match inner.as_rule() {
+            Rule::id => SetVal::Str(intern(inner.as_str())),
+            Rule::int => SetVal::Int(inner.as_str().parse().unwrap_or(0)),
+            _ => SetVal::Str(intern(inner.as_str())),
+        }
+    }
+}
+
+impl fmt::Display for SetVal {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SetVal::Str(s) => write!(f, "{}", resolve(*s)),
+            SetVal::Int(n) => write!(f, "{}", n),
+            SetVal::Vec(v) => {
+                let items: Vec<String> = v.iter().map(|s| s.to_string()).collect();
+                write!(f, "{}", items.join(","))
+            }
+        }
+    }
+}
+
+impl fmt::Display for SetValTerminal {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SetValTerminal::Str(s) => write!(f, "{}", resolve(*s)),
+            SetValTerminal::Int(n) => write!(f, "{}", n),
+        }
+    }
+}
+
+/// Domain specification
+#[derive(Clone, Debug)]
+pub struct Domain {
+    pub parts: Vec<DomainPart>,
+    pub condition: Option<LogicExpr>,
+}
+
+impl Domain {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let mut parts = Vec::new();
+        let mut condition = None;
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::domain_part => parts.push(DomainPart::from_entry(pair)),
+                Rule::logic_expr => condition = Some(LogicExpr::from_entry(pair)),
+                _ => {}
+            }
+        }
+
+        Self { parts, condition }
+    }
+}
+
+impl fmt::Display for Domain {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{{")?;
+        let vars: Vec<_> = self.parts.iter().map(|p| p.var.to_string()).collect();
+        write!(f, "{}", vars.join(", "))?;
+        if self.condition.is_some() {
+            write!(f, ": <condition>")?;
+        }
+        write!(f, "}}")
+    }
+}
+
+/// Single domain part (e.g., "r in REGION")
+#[derive(Clone, Debug)]
+pub struct DomainPart {
+    pub var: DomainPartVar,
+    pub set: String,
+    pub subscript: Subscript,
+}
+
+impl DomainPart {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let mut var = DomainPartVar::Single(String::new());
+        let mut subscript = Subscript::default();
+        let mut set = String::new();
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::domain_var => {
+                    let inner = pair.into_inner().next().unwrap();
+                    var = match inner.as_rule() {
+                        Rule::domain_var_single => {
+                            DomainPartVar::Single(inner.as_str().to_string())
+                        }
+                        Rule::domain_var_tuple => {
+                            let ids: Vec<String> = inner
+                                .into_inner()
+                                .filter(|p| p.as_rule() == Rule::id)
+                                .map(|p| p.as_str().to_string())
+                                .collect();
+                            DomainPartVar::Tuple(ids)
+                        }
+                        _ => unreachable!(),
+                    };
+                }
+                Rule::subscript => {
+                    subscript = Subscript::from_entry(pair);
+                }
+                Rule::domain_set => set = pair.as_str().to_string(),
+                _ => {}
+            }
+        }
+
+        Self {
+            var,
+            subscript,
+            set,
+        }
+    }
+}
+
+impl fmt::Display for DomainPart {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} in {}", self.var, self.set)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum DomainPartVar {
+    Single(String),
+    Tuple(Vec<String>),
+}
+
+impl fmt::Display for DomainPartVar {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DomainPartVar::Single(s) => write!(f, "{}", s),
+            DomainPartVar::Tuple(v) => write!(f, "({})", v.join(", ")),
+        }
+    }
+}
+
+// ==============================
+// ENUMS AND OPERATORS
+// ==============================
+
+/// Relational operator
+#[derive(Clone, Copy, Debug)]
+pub enum RelOp {
+    Lt,
+    Le,
+    Eq,
+    EqEq,
+    Ne,
+    Ne2,
+    Ge,
+    Gt,
+}
+
+impl RelOp {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        match entry.as_str() {
+            "<" => RelOp::Lt,
+            "<=" => RelOp::Le,
+            "=" => RelOp::Eq,
+            "==" => RelOp::EqEq,
+            "<>" => RelOp::Ne,
+            "!=" => RelOp::Ne2,
+            ">=" => RelOp::Ge,
+            ">" => RelOp::Gt,
+            _ => RelOp::Eq,
+        }
+    }
+}
+
+impl fmt::Display for RelOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            RelOp::Lt => write!(f, "<"),
+            RelOp::Le => write!(f, "<="),
+            RelOp::Eq => write!(f, "="),
+            RelOp::EqEq => write!(f, "=="),
+            RelOp::Ne => write!(f, "<>"),
+            RelOp::Ne2 => write!(f, "!="),
+            RelOp::Ge => write!(f, ">="),
+            RelOp::Gt => write!(f, ">"),
+        }
+    }
+}
+
+/// Mathematical operator
+#[derive(Clone, Copy, Debug)]
+pub enum MathOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Pow,
+}
+
+impl MathOp {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        match entry.as_str() {
+            "+" => MathOp::Add,
+            "-" => MathOp::Sub,
+            "*" => MathOp::Mul,
+            "/" => MathOp::Div,
+            "^" => MathOp::Pow,
+            _ => MathOp::Add,
+        }
+    }
+}
+
+impl fmt::Display for MathOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            MathOp::Add => write!(f, "+"),
+            MathOp::Sub => write!(f, "-"),
+            MathOp::Mul => write!(f, "*"),
+            MathOp::Div => write!(f, "/"),
+            MathOp::Pow => write!(f, "^"),
+        }
+    }
+}
+
+/// Boolean operator
+#[derive(Clone, Debug)]
+pub enum BoolOp {
+    And,
+    Or,
+}
+
+impl BoolOp {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        match entry.as_str() {
+            "and" | "&&" => BoolOp::And,
+            "or" | "||" => BoolOp::Or,
+            _ => BoolOp::And,
+        }
+    }
+}
+
+impl fmt::Display for BoolOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            BoolOp::And => write!(f, "and"),
+            BoolOp::Or => write!(f, "or"),
+        }
+    }
+}
+
+/// Variable with optional subscript
+#[derive(Clone, Debug)]
+pub struct VarSubscripted {
+    pub var: String,
+    pub subscript: Subscript,
+}
+
+impl VarSubscripted {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let mut var = String::new();
+        let mut subscript = Subscript::default();
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::var_ref => var = pair.as_str().to_string(),
+                Rule::subscript => subscript = Subscript::from_entry(pair),
+                _ => {}
+            }
+        }
+
+        Self { var, subscript }
+    }
+}
+
+impl fmt::Display for VarSubscripted {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.var)?;
+        if !self.subscript.is_empty() {
+            write!(f, "[...]")?;
+        }
+        Ok(())
+    }
+}
+
+/// SetVals
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default, RefCast)]
+#[repr(transparent)]
+pub struct SetVals(pub Vec<SetVal>);
+
+impl Deref for SetVals {
+    type Target = Vec<SetVal>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Vec<SetVal>> for SetVals {
+    fn from(inner: Vec<SetVal>) -> Self {
+        SetVals(inner)
+    }
+}
+
+/// Index
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default, RefCast)]
+#[repr(transparent)]
+pub struct Index(pub Vec<SetVal>);
+
+impl Deref for Index {
+    type Target = Vec<SetVal>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Vec<SetVal>> for Index {
+    fn from(inner: Vec<SetVal>) -> Self {
+        Index(inner)
+    }
+}
+
+/// Subscript (array indexing with optional shifts)
+#[derive(Clone, Debug, Default)]
+pub struct Subscript(pub Vec<SubscriptPart>);
+
+impl Subscript {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let parts = entry
+            .into_inner()
+            .filter(|p| p.as_rule() == Rule::subscript_part)
+            .map(SubscriptPart::from_entry)
+            .collect();
+        Self(parts)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &SubscriptPart> {
+        self.0.iter()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SubscriptPart {
+    pub var: String,
+    pub shift: Option<SubscriptShift>,
+}
+
+impl SubscriptPart {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let mut var = String::new();
+        let mut shift = None;
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::id => var = pair.as_str().to_string(),
+                Rule::subscript_shift => shift = Some(SubscriptShift::from_entry(pair)),
+                _ => {}
+            }
+        }
+
+        Self { var, shift }
+    }
+}
+
+impl fmt::Display for SubscriptPart {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.var)?;
+        if let Some(shift) = &self.shift {
+            write!(f, "{}", shift)?;
+        }
+        Ok(())
+    }
+}
+
+/// Subscript shift (+1 or -1)
+#[derive(Clone, Debug)]
+pub enum SubscriptShift {
+    Plus,
+    Minus,
+}
+
+impl SubscriptShift {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let s = entry.as_str();
+        if s.starts_with('+') {
+            SubscriptShift::Plus
+        } else {
+            SubscriptShift::Minus
+        }
+    }
+}
+
+impl fmt::Display for SubscriptShift {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SubscriptShift::Plus => write!(f, "+1"),
+            SubscriptShift::Minus => write!(f, "-1"),
+        }
+    }
+}
+
+/// Sum function (iterated sum over a domain)
+#[derive(Clone, Debug)]
+pub struct FuncSum {
+    pub domain: Domain,
+    pub operand: Box<Expr>,
+}
+
+impl fmt::Display for FuncSum {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "sum {} {}", self.domain, self.operand)
+    }
+}
+
+/// Min function
+#[derive(Clone, Debug)]
+pub struct FuncMin {
+    pub domain: Domain,
+    pub var: String,
+}
+
+impl FuncMin {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let mut domain = None;
+        let mut var = String::new();
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::domain => domain = Some(Domain::from_entry(pair)),
+                Rule::func_var => var = pair.as_str().to_string(),
+                _ => {}
+            }
+        }
+        let domain = domain.unwrap();
+
+        Self { domain, var }
+    }
+}
+
+impl fmt::Display for FuncMin {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "min <domain> min(<var>)")
+    }
+}
+
+/// Max function
+#[derive(Clone, Debug)]
+pub struct FuncMax {
+    pub domain: Domain,
+    pub var: String,
+}
+
+impl FuncMax {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let mut domain = None;
+        let mut var = String::new();
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::domain => domain = Some(Domain::from_entry(pair)),
+                Rule::func_var => var = pair.as_str().to_string(),
+                _ => {}
+            }
+        }
+        let domain = domain.unwrap();
+
+        Self { domain, var }
+    }
+}
+
+impl fmt::Display for FuncMax {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "max <domain> max(<var>)")
     }
 }

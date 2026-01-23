@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use crate::gmpl::Expr;
-use crate::gmpl::atoms::{Index, SetVal};
-use crate::gmpl::{ParamDataBody, ParamDataTarget};
+use crate::gmpl::{Expr, Index, ParamDataBody, ParamDataTarget, SetVal};
 use crate::model::ParamWithData;
 
 pub struct Param {
