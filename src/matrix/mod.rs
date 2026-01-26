@@ -4,6 +4,7 @@ mod lookup;
 mod param;
 mod set;
 
+use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -13,11 +14,9 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use smallvec::SmallVec;
 
 use crate::ir::model::ModelWithData;
-use crate::ir::{Constraint, ConstraintExpr, Domain, Expr, Index, Objective};
+use crate::ir::{Constraint, ConstraintExpr, Domain, Expr, Index, Objective, RelOp};
 use crate::matrix::bound::{Bounds, gen_bounds};
-use crate::matrix::constraints::{
-    Pair, RowType, algebra, domain_to_indexes, get_index_map, recurse,
-};
+use crate::matrix::constraints::{Pair, algebra, domain_to_indexes, get_index_map, recurse};
 use crate::matrix::lookup::Lookups;
 
 //                    var     var_index                 con     con_index       val
@@ -25,7 +24,7 @@ pub(crate) type ColsMap = IndexMap<(Spur, Arc<Index>), IndexMap<(Spur, Arc<Index
 //                      con     con_index        type     rhs
 pub(crate) type RowsMap = IndexMap<(Spur, Arc<Index>), (RowType, f64)>;
 //                      var     var_index       bounds
-pub(crate) type BoundsMap = IndexMap<(Spur, Arc<Index>), Arc<Bounds>>;
+pub(crate) type BoundsMap = IndexMap<(Spur, Arc<Index>), Bounds>;
 
 struct ConstraintOrObj {
     name: Spur,
@@ -47,6 +46,40 @@ struct Con {
     row_type: RowType,
     rhs: f64,
     pairs: Vec<Pair>,
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum RowType {
+    L,
+    E,
+    G,
+    N,
+}
+
+impl fmt::Display for RowType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            RowType::L => write!(f, "L"),
+            RowType::E => write!(f, "E"),
+            RowType::G => write!(f, "G"),
+            RowType::N => write!(f, "N"),
+        }
+    }
+}
+
+impl RowType {
+    pub fn from_rel_op(op: &RelOp) -> Self {
+        match op {
+            RelOp::Lt => panic!("Less than not supported"),
+            RelOp::Le => RowType::L,
+            RelOp::Eq => RowType::E,
+            RelOp::EqEq => RowType::E,
+            RelOp::Ne => panic!("Not equal not supported"),
+            RelOp::Ne2 => panic!("Not equal not supported"),
+            RelOp::Ge => RowType::G,
+            RelOp::Gt => panic!("Greater than not supported"),
+        }
+    }
 }
 
 pub fn compile_mps(model: ModelWithData) -> Compiled {

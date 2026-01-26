@@ -1,5 +1,3 @@
-use std::fmt;
-
 use crate::ir::LogicExpr;
 use crate::ir::{
     BoolOp, Domain, DomainPart, DomainPartVar, Expr, Index, MathOp, RelOp, SetVal, SetValTerminal,
@@ -203,40 +201,6 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                     _ => panic!("no vars allowed in expr pow"),
                 },
             }
-        }
-    }
-}
-
-#[derive(Copy, Clone, PartialEq)]
-pub enum RowType {
-    L,
-    E,
-    G,
-    N,
-}
-
-impl fmt::Display for RowType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            RowType::L => write!(f, "L"),
-            RowType::E => write!(f, "E"),
-            RowType::G => write!(f, "G"),
-            RowType::N => write!(f, "N"),
-        }
-    }
-}
-
-impl RowType {
-    pub fn from_rel_op(op: &RelOp) -> Self {
-        match op {
-            RelOp::Lt => panic!("Less than not supported"),
-            RelOp::Le => RowType::L,
-            RelOp::Eq => RowType::E,
-            RelOp::EqEq => RowType::E,
-            RelOp::Ne => panic!("Not equal not supported"),
-            RelOp::Ne2 => panic!("Not equal not supported"),
-            RelOp::Ge => RowType::G,
-            RelOp::Gt => panic!("Greater than not supported"),
         }
     }
 }

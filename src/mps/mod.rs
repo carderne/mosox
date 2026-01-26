@@ -2,7 +2,7 @@ use std::io::{BufWriter, Write};
 
 use crate::{
     ir::{Index, resolve},
-    matrix::{BoundsMap, ColsMap, Compiled, RowsMap, bound::BoundsOp, constraints::RowType},
+    matrix::{BoundsMap, ColsMap, Compiled, RowType, RowsMap, bound::BoundsOp},
 };
 
 pub fn print_mps(compiled: Compiled, model_name: &str) {

@@ -10,13 +10,13 @@ pub fn gen_bounds(cols: &ColsMap, lookups: Lookups) -> BoundsMap {
         .map(|((var_name, var_idx), _)| {
             (
                 (*var_name, var_idx.clone()),
-                lookups.var_map.get(var_name).unwrap().clone(),
+                *lookups.var_map.get(var_name).unwrap(),
             )
         })
         .collect()
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Bounds {
     pub op: BoundsOp,
     pub val: Option<f64>,
@@ -37,7 +37,7 @@ impl Bounds {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum BoundsOp {
     FR,
     LO,
