@@ -1,14 +1,32 @@
 # MPTK (MathProg Translation Kit)
 
 ## Quickstart
-Install
+Install:
 ```bash
 cargo install mptk
 ```
 
-Usage
+Usage overview:
 ```bash
-mptk osemosys.mod atlantis.dat
+> mptk help
+
+MathProg Translation Kit
+
+Usage: mptk <COMMAND>
+
+Commands:
+  check     Check for errors and quit
+  generate  Load and output to MPS
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+Generate MPS for a model and data file pair:
+```bash
+mptk generate model.mod data.dat > output_file.mps
 ```
 
 ## Development
@@ -34,25 +52,3 @@ cargo make run
 ## Docs
 
 - [Grammar](docs/GRAMMAR.md) - GMPL grammar specification and coverage
-
-## Notes
-### Note on indexing
-
-There are three concepts in domain indexing.
-
-#### SET (generically, dimension)
-- type: String
-- Upper-case name for a dimension
-- `YEAR`
-- (The set directive supplies all the values)
-
-#### INDEX (set_index, con_index etc)
-- type: String
-- A single index is a single lower-case letter
-- `y`
-- That a var/param/constraint uses to index a given set/dimension
-
-#### VALUE
-- type: `IndexVal`
-- represents a single actual value in this set/dimension
-- `2014`

@@ -86,7 +86,10 @@ struct SolvedConstraint {
     pairs: Vec<Pair>,
 }
 
-fn build_constraints(constraints: Vec<ConstraintOrObjective>, lookups: &Lookups) -> Vec<SolvedConstraint> {
+fn build_constraints(
+    constraints: Vec<ConstraintOrObjective>,
+    lookups: &Lookups,
+) -> Vec<SolvedConstraint> {
     constraints
         .into_par_iter()
         .flat_map(

@@ -28,7 +28,7 @@ enum Commands {
         verbose: bool,
     },
     /// Load and output to MPS
-    Comp {
+    Generate {
         path: String,
         data_path: Option<String>,
     },
@@ -56,7 +56,7 @@ fn main() -> ExitCode {
             }
             set_exit()
         }
-        Commands::Comp { path, data_path } => {
+        Commands::Generate { path, data_path } => {
             let t_total = Instant::now();
 
             let t0 = Instant::now();
