@@ -56,6 +56,8 @@ impl Var {
             match pair.as_rule() {
                 Rule::name => name = Some(intern(pair.as_str())),
                 Rule::domain => domain = Some(Domain::from_entry(pair)),
+                // simple_domain is parsed but not used - var access uses index values from the set
+                Rule::simple_domain => {}
                 Rule::var_bounds => bounds = Some(VarBounds::from_entry(pair)),
                 Rule::param_type => param_type = Some(ParamType::from_entry(pair)),
                 _ => {}
@@ -87,6 +89,13 @@ impl fmt::Display for Var {
     }
 }
 
+/// Parameter assignment (expression or inline data)
+#[derive(Clone, Debug)]
+pub enum ParamAssign {
+    Expr(Expr),
+    Data(ParamDataBody),
+}
+
 /// Parameter declaration
 #[derive(Clone, Debug)]
 pub struct Param {
@@ -96,7 +105,7 @@ pub struct Param {
     pub conditions: Vec<ParamCondition>,
     pub param_in: Option<Expr>,
     pub default: Option<Expr>,
-    pub assign: Option<Expr>,
+    pub assign: Option<ParamAssign>,
 }
 
 impl Param {
@@ -113,6 +122,8 @@ impl Param {
             match pair.as_rule() {
                 Rule::name => name = Some(intern(pair.as_str())),
                 Rule::domain => domain = Some(Domain::from_entry(pair)),
+                // simple_domain is parsed but not used - param access uses index values from the set
+                Rule::simple_domain => {}
                 Rule::param_type => param_type = Some(ParamType::from_entry(pair)),
                 Rule::param_condition => conditions.push(ParamCondition::from_entry(pair)),
                 Rule::param_in => param_in = pair.into_inner().next().map(|p| Expr::from_entry(p)),
@@ -127,7 +138,12 @@ impl Param {
                     }
                 }
                 Rule::param_assign => {
-                    assign = pair.into_inner().next().map(|p| Expr::from_entry(p))
+                    let inner = pair.into_inner().next().unwrap();
+                    assign = Some(match inner.as_rule() {
+                        Rule::expr => ParamAssign::Expr(Expr::from_entry(inner)),
+                        Rule::param_data_body => ParamAssign::Data(parse_param_data_body(inner)),
+                        _ => unreachable!("Unexpected rule in param_assign: {:?}", inner.as_rule()),
+                    });
                 }
                 _ => {}
             }
@@ -163,8 +179,10 @@ impl fmt::Display for Param {
         if self.default.is_some() {
             write!(f, " default <expr>")?;
         }
-        if self.assign.is_some() {
-            write!(f, " := <expr>")?;
+        match &self.assign {
+            Some(ParamAssign::Expr(_)) => write!(f, " := <expr>")?,
+            Some(ParamAssign::Data(_)) => write!(f, " := <data>")?,
+            None => {}
         }
         Ok(())
     }
@@ -178,6 +196,7 @@ pub struct Set {
     pub within: Option<String>,
     pub cross: Option<String>,
     pub expr: Option<SetExpr>,
+    pub inline_data: Option<SetVals>,
 }
 
 impl Set {
@@ -187,14 +206,15 @@ impl Set {
         let mut within = None;
         let mut cross = None;
         let mut expr = None;
+        let mut inline_data = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::id => name = Some(intern(pair.as_str())),
-                Rule::set_domain => {
+                Rule::simple_domain => {
                     for inner in pair.into_inner() {
-                        if inner.as_rule() == Rule::set_domain_part {
-                            dims.push(SetDomainPart::from_entry(inner));
+                        if inner.as_rule() == Rule::simple_domain_part {
+                            dims.push(SetDomainPart::from_simple_domain_part(inner));
                         }
                     }
                 }
@@ -208,6 +228,7 @@ impl Set {
                     }
                 }
                 Rule::set_expr => expr = Some(SetExpr::from_entry(pair)),
+                Rule::set_assign => inline_data = Some(parse_set_assign(pair)),
                 _ => {}
             }
         }
@@ -218,6 +239,7 @@ impl Set {
             within,
             cross,
             expr,
+            inline_data,
         }
     }
 }
@@ -242,6 +264,30 @@ impl SetDomainPart {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::id => id = Some(intern(pair.as_str())),
+                Rule::domain_set => set = Some(intern(pair.as_str())),
+                _ => {}
+            }
+        }
+
+        Self {
+            id,
+            set: set.unwrap(),
+        }
+    }
+
+    /// Parse from simple_domain_part (used in SET declarations)
+    /// Grammar: simple_domain_part = { (id ~ "in")? ~ domain_set }
+    pub fn from_simple_domain_part(entry: Pair<Rule>) -> Self {
+        let mut id: Option<Spur> = None;
+        let mut set: Option<Spur> = None;
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::id => {
+                    // In simple_domain_part, id comes before "in" keyword
+                    // If we already have an id, this shouldn't happen
+                    id = Some(intern(pair.as_str()));
+                }
                 Rule::domain_set => set = Some(intern(pair.as_str())),
                 _ => {}
             }
@@ -377,7 +423,7 @@ impl SetData {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
         let mut name: Option<Spur> = None;
         let mut index = smallvec![];
-        let mut values = Vec::new();
+        let mut values = SetVals::default();
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
@@ -390,50 +436,7 @@ impl SetData {
                     }
                 }
                 Rule::set_assign => {
-                    for inner in pair.into_inner() {
-                        match inner.as_rule() {
-                            Rule::set_vals => {
-                                // Simple values: push each directly
-                                for val in inner.into_inner() {
-                                    if val.as_rule() == Rule::set_val {
-                                        values.push(SetVal::from_entry(val));
-                                    }
-                                }
-                            }
-                            Rule::set_tuples => {
-                                // Tuples: wrap in SetVal::Tuple with SetValTerminal
-                                for tuple in inner.into_inner() {
-                                    if tuple.as_rule() == Rule::set_tuple {
-                                        let tuple_vals: Vec<SetValTerminal> = tuple
-                                            .into_inner()
-                                            .filter(|p| p.as_rule() == Rule::set_val)
-                                            .map(|p| {
-                                                let inner = p.into_inner().next().unwrap();
-                                                match inner.as_rule() {
-                                                    Rule::id => {
-                                                        SetValTerminal::Str(intern(inner.as_str()))
-                                                    }
-                                                    Rule::int => SetValTerminal::Int(
-                                                        inner.as_str().parse().unwrap_or(0),
-                                                    ),
-                                                    _ => {
-                                                        SetValTerminal::Str(intern(inner.as_str()))
-                                                    }
-                                                }
-                                            })
-                                            .collect();
-                                        assert!(
-                                            tuple_vals.len() == 2,
-                                            "Only 2-element tuples supported, got {}",
-                                            tuple_vals.len()
-                                        );
-                                        values.push(SetVal::Tuple([tuple_vals[0], tuple_vals[1]]));
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                    values = parse_set_assign(pair);
                 }
                 _ => {}
             }
@@ -442,7 +445,7 @@ impl SetData {
         Self {
             name: name.unwrap(),
             index,
-            values: SetVals(values),
+            values,
         }
     }
 }
@@ -503,25 +506,7 @@ impl ParamData {
                 Rule::id => name = Some(intern(pair.as_str())),
                 Rule::param_data_default => default = Some(pair.as_str().parse().unwrap()),
                 Rule::param_data_body => {
-                    let mut inner_pairs = pair.into_inner();
-                    let first = inner_pairs.next().unwrap();
-
-                    body = Some(match first.as_rule() {
-                        Rule::param_data_list => {
-                            let pairs = first.into_inner().map(ParamDataPair::from_entry).collect();
-                            ParamDataBody::List(pairs)
-                        }
-                        Rule::param_data_matrix => {
-                            let mut tables = vec![ParamDataTable::from_entry(first)];
-                            tables.extend(inner_pairs.map(ParamDataTable::from_entry));
-                            ParamDataBody::Tables(tables)
-                        }
-                        Rule::param_data_scalar => {
-                            let num: f64 = first.as_str().parse().unwrap();
-                            ParamDataBody::Num(num)
-                        }
-                        _ => unreachable!(),
-                    });
+                    body = Some(parse_param_data_body(pair));
                 }
                 _ => {}
             }
@@ -1371,6 +1356,75 @@ impl From<Vec<SetVal>> for SetVals {
 /// Index
 pub type Index = SmallVec<[SetVal; 6]>;
 
+/// Parse set_assign into SetVals (reused by both Set and SetData)
+fn parse_set_assign(pair: Pair<Rule>) -> SetVals {
+    let mut values = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::set_vals => {
+                for val in inner.into_inner() {
+                    if val.as_rule() == Rule::set_val {
+                        values.push(SetVal::from_entry(val));
+                    }
+                }
+            }
+            Rule::set_tuples => {
+                for tuple in inner.into_inner() {
+                    if tuple.as_rule() == Rule::set_tuple {
+                        let tuple_vals: Vec<SetValTerminal> = tuple
+                            .into_inner()
+                            .filter(|p| p.as_rule() == Rule::set_val)
+                            .map(|p| {
+                                let inner = p.into_inner().next().unwrap();
+                                match inner.as_rule() {
+                                    Rule::id => SetValTerminal::Str(intern(inner.as_str())),
+                                    Rule::int => {
+                                        SetValTerminal::Int(inner.as_str().parse().unwrap_or(0))
+                                    }
+                                    _ => SetValTerminal::Str(intern(inner.as_str())),
+                                }
+                            })
+                            .collect();
+                        assert!(
+                            tuple_vals.len() == 2,
+                            "Only 2-element tuples supported, got {}",
+                            tuple_vals.len()
+                        );
+                        values.push(SetVal::Tuple([tuple_vals[0], tuple_vals[1]]));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    SetVals(values)
+}
+
+/// Parse param_data_body into ParamDataBody (reused by Param and ParamData)
+fn parse_param_data_body(pair: Pair<Rule>) -> ParamDataBody {
+    let mut inner_pairs = pair.into_inner();
+    let first = inner_pairs.next().unwrap();
+
+    match first.as_rule() {
+        Rule::param_data_list => {
+            let pairs = first.into_inner().map(ParamDataPair::from_entry).collect();
+            ParamDataBody::List(pairs)
+        }
+        Rule::param_data_matrix => {
+            let mut tables = vec![ParamDataTable::from_entry(first)];
+            tables.extend(inner_pairs.map(ParamDataTable::from_entry));
+            ParamDataBody::Tables(tables)
+        }
+        Rule::param_data_scalar => {
+            let num: f64 = first.as_str().parse().unwrap();
+            ParamDataBody::Num(num)
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// Subscript (array indexing with optional shifts)
 #[derive(Clone, Debug, Default)]
 pub struct Subscript(pub Vec<SubscriptPart>);
@@ -1407,7 +1461,7 @@ impl SubscriptPart {
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::id => var = intern(pair.as_str()),
+                Rule::id | Rule::int => var = intern(pair.as_str()),
                 Rule::subscript_shift => shift = Some(SubscriptShift::from_entry(pair)),
                 _ => {}
             }

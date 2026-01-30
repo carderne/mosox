@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ir::model::ParamWithData;
-use crate::ir::{Expr, Index, ParamDataBody, ParamDataTarget, SetVal};
+use crate::ir::{Expr, Index, ParamAssign, ParamDataBody, ParamDataTarget, SetVal};
 
 pub struct Param {
     pub data: ParamVal,
@@ -67,7 +67,7 @@ pub fn resolve_param(param: ParamWithData) -> Param {
                 }
             }
         }
-    } else if let Some(expr) = param.decl.assign {
+    } else if let Some(ParamAssign::Expr(expr)) = param.decl.assign {
         Param {
             data: ParamVal::Expr(expr),
             default,

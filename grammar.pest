@@ -26,6 +26,7 @@ model_entry = _{
   | FOR
   | TABLE
   | PRINT
+  | DISPLAY
   | CHECK
   | SOLVE
   | END
@@ -33,27 +34,25 @@ model_entry = _{
 
 // Variable
 // Example: var Demand >= 0;
-VAR        = { "var" ~ name ~ domain? ~ var_bounds? ~ ("," ~ param_type)? ~ ";" }
+VAR        = { "var" ~ name ~ (domain | simple_domain)? ~ var_bounds? ~ (","? ~ param_type)? ~ ";" }
 var_bounds = { rel_op ~ number }
 
 // Parameter
 // The comma separator seems to be optional
 // Example: param Discount{r in REGION} := (1 + DiscountRate[r])
-PARAM           =  { "param" ~ name ~ domain? ~ (","? ~ param_attrib)* ~ param_assign? ~ ";" }
+PARAM           =  { "param" ~ name ~ (domain | simple_domain)? ~ (","? ~ param_attrib)* ~ param_assign? ~ ";" }
 param_attrib    = _{ param_type | param_condition | param_in | param_default }
 param_type      =  { "integer" | "binary" | "symbolic" }
 param_condition =  { rel_op ~ expr }
 param_in        =  { "in" ~ expr }
-param_assign    =  { ":=" ~ expr }
+param_assign    =  { ":=" ~ (param_data_body | expr) }
 // string_literal here is only used for output path
 param_default   =  { "default" ~ (expr | string_literal) }
 
 // Set
 // Example: set DAILYTIMEBRACKET;
-SET             =  { "set" ~ id ~ set_domain? ~ set_condition? ~ (":=" ~ set_expr)? ~ ";" }
+SET             =  { "set" ~ id ~ simple_domain? ~ set_condition? ~ (":=" ~ (set_expr | set_assign))? ~ ";" }
 // unlike `domain`, this doesn't allow a condition, and the "f in" part is optional
-set_domain      =  { "{" ~ (set_domain_part ~ ","?)+ ~ "}" }
-set_domain_part =  { (id ~ "in")? ~ domain_set }
 set_condition   =  { "within" ~ within_set ~ ("cross" ~ cross_set)? }
 within_set      = @{ id }
 cross_set       = @{ id }
@@ -79,7 +78,8 @@ FOR       = { "for" ~ domain ~ "{" ~ for_inner* ~ "}" }
 for_inner = { FOR | PRINT }
 
 // Print (ignored)
-PRINT = @{ "printf" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
+PRINT   = @{ "printf" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
+DISPLAY = @{ "display" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
 
 // Check (ignored)
 CHECK = @{ "check" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
@@ -124,15 +124,15 @@ index  =  { "[" ~ set_val ~ ("," ~ set_val)* ~ "]" }
 
 // Data: Param
 PARAM_DATA          =  {
-    "param" ~ id ~ ("default" ~ param_data_default)? ~ ":="? ~ param_data_body? ~ ";"
+    "param" ~ id ~ simple_domain? ~ ("default" ~ param_data_default)? ~ ":="? ~ param_data_body? ~ ";"
 }
 param_data_default  = @{ number }
-param_data_body =      { param_data_scalar | param_data_matrix+ | param_data_list }
+param_data_body =      { param_data_matrix+ | param_data_list | param_data_scalar }
 // We don't support using "list" format for 2D params
 // As there's no way to unambiguously parse in PEST (needs post-processing)
 param_data_scalar   = @{ number }
 param_data_list     =  { param_data_pair+ }
-param_data_pair     =  { set_val ~ number }
+param_data_pair     =  { set_val ~ number ~ ","? }
 param_data_matrix   =  { param_data_target? ~ ":" ~ param_data_cols ~ ":="? ~ param_data_row+ }
 param_data_cols     =  { set_val+ }
 param_data_row      = ${ set_val ~ param_data_row_vals }
@@ -155,6 +155,11 @@ domain_var_single  = @{ id }
 domain_var_tuple   = { "(" ~ id ~ ("," ~ id)+ ~ ")" }
 domain_set         = @{ id }
 
+// Simple domain
+// (Without var assignment)
+simple_domain      =  { "{" ~ (simple_domain_part ~ ","?)+ ~ "}" }
+simple_domain_part =  { (id ~ "in")? ~ domain_set }
+
 // Logical expression
 // Expressions that evaluate to true or false
 // Uses Pratt parser for proper operator precedence (and > or)
@@ -169,7 +174,7 @@ logic_compound =  { "(" ~ logic_expr ~ ")" }
 var_subscripted =  { var_ref ~ subscript? }
 var_ref         = @{ id }
 subscript       =  { "[" ~ subscript_part ~ ("," ~ subscript_part)* ~ "]" }
-subscript_part  =  { id ~ subscript_shift? }
+subscript_part  =  { (id | int) ~ subscript_shift? }
 subscript_shift =  { ("+" | "-") ~ "1" }
 
 // Expression

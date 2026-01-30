@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use std::fmt;
 
 use lasso::Spur;
+use smallvec::smallvec;
 
 use crate::ir::{
-    Constraint, ConstraintExpr, Domain, Entry, Expr, Objective, Param, ParamData, Set, SetData,
-    Var, intern_resolve, op::RowType,
+    Constraint, ConstraintExpr, Domain, Entry, Expr, Objective, Param, ParamAssign, ParamData, Set,
+    SetData, Var, intern_resolve, op::RowType,
 };
 
 /// A set declaration with optional data
@@ -120,6 +121,28 @@ impl ModelWithData {
                 Entry::Constraint(constraint) => constraints.push(constraint),
                 Entry::DataSet(data_set) => data_sets.push(data_set),
                 Entry::DataParam(data_param) => data_params.push(data_param),
+            }
+        }
+
+        // Convert inline set data to SetData entries
+        for set in &sets {
+            if let Some(ref inline_data) = set.inline_data {
+                data_sets.push(SetData {
+                    name: set.name,
+                    index: smallvec![],
+                    values: inline_data.clone(),
+                });
+            }
+        }
+
+        // Convert inline param data to ParamData entries
+        for param in &params {
+            if let Some(ParamAssign::Data(ref body)) = param.assign {
+                data_params.push(ParamData {
+                    name: param.name,
+                    default: None,
+                    body: Some(body.clone()),
+                });
             }
         }
 

@@ -57,6 +57,7 @@ pub fn consume(entries: Pairs<'_, Rule>) -> Vec<Entry> {
             Rule::END => {}
             Rule::EOI => {}
             Rule::PRINT => {}
+            Rule::DISPLAY => {}
             Rule::CHECK => {}
             Rule::SOLVE => {}
             Rule::FOR => {}

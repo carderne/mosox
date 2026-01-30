@@ -1,7 +1,7 @@
 use crate::ir::LogicExpr;
 use crate::ir::{
     BoolOp, Domain, DomainPart, DomainPartVar, Expr, Index, MathOp, RelOp, SetVal, SetValTerminal,
-    Subscript, SubscriptShift,
+    Subscript, SubscriptShift, interner::intern_resolve,
 };
 use crate::matrix::lookup::Lookups;
 use crate::matrix::param::ParamVal;
@@ -485,8 +485,21 @@ fn concrete_index(susbcript: &Subscript, idx_val_map: &IdxValMap) -> Index {
     susbcript
         .iter()
         .map(|i| {
-            let index_val =
-                idx_get(idx_val_map, i.var).unwrap_or_else(|| panic!("No idx val available at",));
+            // First try to look up as a domain variable
+            // If not found, check if it's a literal number
+            let index_val: SetVal = match idx_get(idx_val_map, i.var) {
+                Some(val) => *val,
+                None => {
+                    // Try parsing as a literal number
+                    let var_str = intern_resolve(i.var);
+                    if let Ok(num) = var_str.parse::<u32>() {
+                        SetVal::Int(num)
+                    } else {
+                        // It's a string literal (identifier used as index value)
+                        SetVal::Str(i.var)
+                    }
+                }
+            };
             match &i.shift {
                 Some(shift) => match index_val {
                     SetVal::Str(_) => {
@@ -500,7 +513,7 @@ fn concrete_index(susbcript: &Subscript, idx_val_map: &IdxValMap) -> Index {
                         panic!("tuple set not allowed in var subscript")
                     }
                 },
-                None => *index_val,
+                None => index_val,
             }
         })
         .collect::<Vec<_>>()
