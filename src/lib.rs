@@ -1,6 +1,6 @@
-//! # mptk
+//! # mosox
 //!
-//! `mptk` is a GMPL parser and matrix generator.
+//! `mosox` is a GMPL parser and matrix generator.
 
 mod gmpl;
 mod ir;
@@ -61,7 +61,7 @@ pub fn matrix_to_mps(compiled: Compiled, model_name: &str) {
 /// Get the stem from a path.
 ///
 /// ```
-/// use mptk::stem;
+/// use mosox::stem;
 /// let path = "/some/file.txt";
 /// let path_stem = stem(path);
 /// assert!(path_stem == "file");

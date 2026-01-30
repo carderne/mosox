@@ -1,13 +1,13 @@
-//! # mptk
+//! # mosox
 //!
-//! `mptk` is a GMPL parser and matrix generator.
+//! `mosox` is a GMPL parser and matrix generator.
 
 use std::process::ExitCode;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 
-use mptk::{generate_matrix, load_model_and_data, matrix_to_mps, merge_model, stem};
+use mosox::{generate_matrix, load_model_and_data, matrix_to_mps, merge_model, stem};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]

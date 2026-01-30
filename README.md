@@ -1,18 +1,20 @@
-# MPTK (MathProg Translation Kit)
+# mosox
+
+An LP matrix generator for GMPL (GNU MathProg).
 
 ## Quickstart
 Install:
 ```bash
-cargo install mptk
+cargo install mosox
 ```
 
 Usage overview:
 ```bash
-> mptk help
+> mosox help
 
 MathProg Translation Kit
 
-Usage: mptk <COMMAND>
+Usage: mosox <COMMAND>
 
 Commands:
   check     Check for errors and quit
@@ -26,7 +28,7 @@ Options:
 
 Generate MPS for a model and data file pair:
 ```bash
-mptk generate model.mod data.dat > output_file.mps
+mosox generate model.mod data.dat > output_file.mps
 ```
 
 ## Development

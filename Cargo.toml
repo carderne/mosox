@@ -1,11 +1,11 @@
 [package]
-name = "mptk"
+name = "mosox"
 license = "MIT"
 authors = ["Chris Arderne <chris@rdrn.me"]
-description = "MathProg Translation Kit"
+description = "LP matrix generator for GMPL"
 version = "0.0.999"  # set by Github Actions CI
 edition = "2024"
-repository = "https://github.com/carderne/mptk"
+repository = "https://github.com/carderne/mosox"
 
 [dependencies]
 clap = { version = "4.5.48", features = ["derive"] }
@@ -20,11 +20,11 @@ rayon = "1.11.0"
 smallvec = "1.15.1"
 
 [lib]
-name = "mptk"
+name = "mosox"
 crate-type = ["cdylib", "lib"]
 
 [[bin]]
-name = "mptk"
+name = "mosox"
 path = "src/main.rs"
 
 [profile.release]
