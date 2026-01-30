@@ -188,25 +188,36 @@ impl fmt::Display for Param {
     }
 }
 
+/// Set value (expression or inline data)
+#[derive(Clone, Debug)]
+pub enum SetValue {
+    Expr(SetExpr),
+    Vals(SetVals),
+}
+
 /// Set declaration
 #[derive(Clone, Debug)]
 pub struct Set {
     pub name: Spur,
     pub dims: Vec<SetDomainPart>,
+    pub dimen: Option<u32>,
     pub within: Option<String>,
     pub cross: Option<String>,
     pub expr: Option<SetExpr>,
     pub inline_data: Option<SetVals>,
+    pub default: Option<SetValue>,
 }
 
 impl Set {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
         let mut name: Option<Spur> = None;
         let mut dims = Vec::new();
+        let mut dimen = None;
         let mut within = None;
         let mut cross = None;
         let mut expr = None;
         let mut inline_data = None;
+        let mut default = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
@@ -218,17 +229,44 @@ impl Set {
                         }
                     }
                 }
-                Rule::set_condition => {
-                    for inner in pair.into_inner() {
-                        match inner.as_rule() {
-                            Rule::within_set => within = Some(inner.as_str().to_string()),
-                            Rule::cross_set => cross = Some(inner.as_str().to_string()),
-                            _ => {}
+                Rule::set_attrib => {
+                    let inner = pair.into_inner().next().unwrap();
+                    match inner.as_rule() {
+                        Rule::set_dimen => {
+                            let int_pair = inner.into_inner().next().unwrap();
+                            dimen = Some(int_pair.as_str().parse().unwrap());
                         }
+                        Rule::set_within => {
+                            for p in inner.into_inner() {
+                                match p.as_rule() {
+                                    Rule::within_set => within = Some(p.as_str().to_string()),
+                                    Rule::cross_set => cross = Some(p.as_str().to_string()),
+                                    _ => {}
+                                }
+                            }
+                        }
+                        Rule::set_assign => {
+                            let assign_inner = inner.into_inner().next().unwrap();
+                            match assign_inner.as_rule() {
+                                Rule::set_expr => expr = Some(SetExpr::from_entry(assign_inner)),
+                                Rule::set_vals | Rule::set_tuples => {
+                                    inline_data = Some(parse_set_vals_or_tuples(assign_inner));
+                                }
+                                _ => {}
+                            }
+                        }
+                        Rule::set_default => {
+                            let default_inner = inner.into_inner().next().unwrap();
+                            default = Some(match default_inner.as_rule() {
+                                Rule::set_expr => {
+                                    SetValue::Expr(SetExpr::from_entry(default_inner))
+                                }
+                                _ => SetValue::Vals(parse_set_vals_or_tuples(default_inner)),
+                            });
+                        }
+                        _ => {}
                     }
                 }
-                Rule::set_expr => expr = Some(SetExpr::from_entry(pair)),
-                Rule::set_assign => inline_data = Some(parse_set_assign(pair)),
                 _ => {}
             }
         }
@@ -236,10 +274,12 @@ impl Set {
         Self {
             name: name.unwrap(),
             dims,
+            dimen,
             within,
             cross,
             expr,
             inline_data,
+            default,
         }
     }
 }
@@ -435,7 +475,7 @@ impl SetData {
                         }
                     }
                 }
-                Rule::set_assign => {
+                Rule::set_data_assign => {
                     values = parse_set_assign(pair);
                 }
                 _ => {}
@@ -1356,50 +1396,54 @@ impl From<Vec<SetVal>> for SetVals {
 /// Index
 pub type Index = SmallVec<[SetVal; 6]>;
 
-/// Parse set_assign into SetVals (reused by both Set and SetData)
-fn parse_set_assign(pair: Pair<Rule>) -> SetVals {
+/// Parse set_vals or set_tuples directly into SetVals
+fn parse_set_vals_or_tuples(pair: Pair<Rule>) -> SetVals {
     let mut values = Vec::new();
 
-    for inner in pair.into_inner() {
-        match inner.as_rule() {
-            Rule::set_vals => {
-                for val in inner.into_inner() {
-                    if val.as_rule() == Rule::set_val {
-                        values.push(SetVal::from_entry(val));
-                    }
+    match pair.as_rule() {
+        Rule::set_vals => {
+            for val in pair.into_inner() {
+                if val.as_rule() == Rule::set_val {
+                    values.push(SetVal::from_entry(val));
                 }
             }
-            Rule::set_tuples => {
-                for tuple in inner.into_inner() {
-                    if tuple.as_rule() == Rule::set_tuple {
-                        let tuple_vals: Vec<SetValTerminal> = tuple
-                            .into_inner()
-                            .filter(|p| p.as_rule() == Rule::set_val)
-                            .map(|p| {
-                                let inner = p.into_inner().next().unwrap();
-                                match inner.as_rule() {
-                                    Rule::id => SetValTerminal::Str(intern(inner.as_str())),
-                                    Rule::int => {
-                                        SetValTerminal::Int(inner.as_str().parse().unwrap_or(0))
-                                    }
-                                    _ => SetValTerminal::Str(intern(inner.as_str())),
-                                }
-                            })
-                            .collect();
-                        assert!(
-                            tuple_vals.len() == 2,
-                            "Only 2-element tuples supported, got {}",
-                            tuple_vals.len()
-                        );
-                        values.push(SetVal::Tuple([tuple_vals[0], tuple_vals[1]]));
-                    }
-                }
-            }
-            _ => {}
         }
+        Rule::set_tuples => {
+            for tuple in pair.into_inner() {
+                if tuple.as_rule() == Rule::set_tuple {
+                    let tuple_vals: Vec<SetValTerminal> = tuple
+                        .into_inner()
+                        .filter(|p| p.as_rule() == Rule::set_val)
+                        .map(|p| {
+                            let inner = p.into_inner().next().unwrap();
+                            match inner.as_rule() {
+                                Rule::id => SetValTerminal::Str(intern(inner.as_str())),
+                                Rule::int => {
+                                    SetValTerminal::Int(inner.as_str().parse().unwrap_or(0))
+                                }
+                                _ => SetValTerminal::Str(intern(inner.as_str())),
+                            }
+                        })
+                        .collect();
+                    assert!(
+                        tuple_vals.len() == 2,
+                        "Only 2-element tuples supported, got {}",
+                        tuple_vals.len()
+                    );
+                    values.push(SetVal::Tuple([tuple_vals[0], tuple_vals[1]]));
+                }
+            }
+        }
+        _ => {}
     }
 
     SetVals(values)
+}
+
+/// Parse set_assign (`:= ...`) into SetVals (used by SetData in data section)
+fn parse_set_assign(pair: Pair<Rule>) -> SetVals {
+    let inner = pair.into_inner().next().unwrap();
+    parse_set_vals_or_tuples(inner)
 }
 
 /// Parse param_data_body into ParamDataBody (reused by Param and ParamData)
