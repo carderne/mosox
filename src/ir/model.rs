@@ -6,7 +6,7 @@ use smallvec::smallvec;
 
 use crate::ir::{
     Constraint, ConstraintExpr, Domain, Entry, Expr, Objective, Param, ParamAssign, ParamData, Set,
-    SetData, Var, intern_resolve, op::RowType,
+    SetData, SetVal, SetValTerminal, SetVals, Var, intern_resolve, op::RowType,
 };
 
 /// A set declaration with optional data
@@ -158,7 +158,17 @@ impl ModelWithData {
         // Match data sets to model sets
         let mut matched_sets = Vec::new();
         for set in sets {
-            let data = data_set_map.remove(&set.name).unwrap_or_default();
+            let mut data = data_set_map.remove(&set.name).unwrap_or_default();
+
+            // If dimen > 1, regroup flat values into tuples
+            if let Some(dimen) = set.dimen
+                && dimen > 1
+            {
+                for set_data in &mut data {
+                    set_data.values = regroup_set_values(&set_data.values, dimen as usize);
+                }
+            }
+
             matched_sets.push(SetWithData { decl: set, data });
         }
 
@@ -240,4 +250,42 @@ fn prep_constraints(
         rhs: Expr::Number(0.0),
     });
     all
+}
+
+/// Regroup flat set values into tuples based on dimension
+/// e.g., with dimen=2: [A, 1, B, 2, ...] -> [(A,1), (B,2), ...]
+fn regroup_set_values(values: &SetVals, dimen: usize) -> SetVals {
+    // If already tuples or dimen is 1, return as-is
+    if dimen <= 1 {
+        return values.clone();
+    }
+
+    // Check if values are already tuples (first value is a Tuple)
+    if let Some(SetVal::Tuple(_)) = values.first() {
+        return values.clone();
+    }
+
+    // Convert flat values to terminals and group them
+    let terminals: Vec<SetValTerminal> = values
+        .iter()
+        .map(|v| match v {
+            SetVal::Str(s) => SetValTerminal::Str(*s),
+            SetVal::Int(i) => SetValTerminal::Int(*i),
+            SetVal::Tuple(_) => panic!("unexpected tuple in flat values"),
+        })
+        .collect();
+
+    // Group by dimen (only supports 2-tuples currently)
+    assert!(
+        dimen == 2,
+        "Only 2-element tuples supported, got dimen={}",
+        dimen
+    );
+
+    let tuples: Vec<SetVal> = terminals
+        .chunks(dimen)
+        .map(|chunk| SetVal::Tuple([chunk[0], chunk[1]]))
+        .collect();
+
+    SetVals(tuples)
 }

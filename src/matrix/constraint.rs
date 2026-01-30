@@ -85,7 +85,8 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                     SetVal::Tuple(_) => panic!("tuple set not allowed in var subscript"),
                 }
             } else {
-                panic!("symbol does not point to a valid var or param",);
+                let symbol = intern_resolve(var_or_param.var);
+                panic!("symbol {} does not point to a valid var or param", symbol);
             }
         }
         Expr::FuncSum(func) => expand_sum(&func.operand, &func.domain, lookups, idx_val_map),
@@ -422,7 +423,11 @@ pub fn get_index_map(parts: &[DomainPart], idx: &[SetVal]) -> IdxValMap {
                         (*v, set_val)
                     })
                     .collect(),
-                _ => panic!("mismatched tuple/non-tuple indexes"),
+                _ => {
+                    dbg!(&part.var);
+                    dbg!(&idx_val);
+                    panic!("mismatched tuple/non-tuple indexes");
+                }
             }
         })
         .collect()

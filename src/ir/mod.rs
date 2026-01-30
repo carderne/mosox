@@ -344,6 +344,7 @@ impl SetDomainPart {
 pub enum SetExpr {
     Domain(Domain),
     SetMath(SetMath),
+    SetOf(SetOf),
 }
 
 impl SetExpr {
@@ -351,7 +352,8 @@ impl SetExpr {
         let inner = entry.into_inner().next().unwrap();
         match inner.as_rule() {
             Rule::domain => SetExpr::Domain(Domain::from_entry(inner)),
-            Rule::set_math => SetExpr::SetMath(SetMath::from_entry(inner)),
+            Rule::set_inter => SetExpr::SetMath(SetMath::from_entry(inner)),
+            Rule::set_setof => SetExpr::SetOf(SetOf::from_entry(inner)),
             _ => unreachable!("Unexpected rule in set_expr: {:?}", inner.as_rule()),
         }
     }
@@ -370,6 +372,46 @@ impl SetMath {
             .map(VarSubscripted::from_entry)
             .collect();
         Self { intersection }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SetOf {
+    pub domain: Domain,
+    pub integrand: DomainPartVar,
+}
+
+impl SetOf {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let mut domain = None;
+        let mut integrand = DomainPartVar::Single(intern(""));
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::domain => domain = Some(Domain::from_entry(pair)),
+                Rule::domain_var => {
+                    let inner = pair.into_inner().next().unwrap();
+                    integrand = match inner.as_rule() {
+                        Rule::domain_var_single => DomainPartVar::Single(intern(inner.as_str())),
+                        Rule::domain_var_tuple => {
+                            let ids: Vec<Spur> = inner
+                                .into_inner()
+                                .filter(|p| p.as_rule() == Rule::id)
+                                .map(|p| intern(p.as_str()))
+                                .collect();
+                            DomainPartVar::Tuple(ids)
+                        }
+                        _ => unreachable!(),
+                    };
+                }
+                _ => {}
+            }
+        }
+
+        Self {
+            domain: domain.unwrap(),
+            integrand,
+        }
     }
 }
 

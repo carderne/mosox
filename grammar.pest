@@ -56,6 +56,9 @@ set_attrib      =  { set_dimen | set_within | set_assign | set_default }
 set_dimen       =  { "dimen" ~ int }
 set_assign      =  { ":=" ~ (set_expr | set_vals | set_tuples) }
 set_default     =  { "default" ~ ( set_expr | set_vals | set_tuples) }
+set_expr        =  { domain | set_inter | set_setof }
+set_inter       =  { var_subscripted ~ ("inter" ~ var_subscripted)+ }
+set_setof       =  { "setof" ~ domain ~ domain_var }
 
 // unlike `domain`, this doesn't allow a condition, and the "f in" part is optional
 set_within      =  { "within" ~ within_set ~ ("cross" ~ cross_set)? }
@@ -119,8 +122,6 @@ set_tuples       = { set_tuple+ }
 set_tuple        = { "(" ~ set_val ~ "," ~ set_val ~ ")" }
 set_vals         = { set_val+ }
 set_val          = { id | int }
-set_expr         = { domain | set_math }
-set_math         = { var_subscripted ~ ("inter" ~ var_subscripted)+ }
 
 // Index
 // Whereas a subscript is symbolic, an "index" is made up of concrete values

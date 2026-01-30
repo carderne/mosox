@@ -2,7 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     ir::model::SetWithData,
-    ir::{self, Index, SetData, SetExpr, SetVal, SetVals, SetValue},
+    ir::{
+        self, DomainPartVar, Index, SetData, SetExpr, SetOf, SetVal, SetValTerminal, SetVals,
+        SetValue,
+    },
     matrix::{
         constraint::{IdxValMap, domain_to_indexes, idx_get},
         lookup::Lookups,
@@ -127,8 +130,100 @@ impl SetCont {
 
                 intersect(sets).into()
             }
+            SetExpr::SetOf(set_of) => resolve_set_of(set_of, dims, index, lookups),
         }
     }
+}
+
+fn resolve_set_of(
+    set_of: &SetOf,
+    dims: &[ir::SetDomainPart],
+    index: &Index,
+    lookups: &Lookups,
+) -> SetVals {
+    let idx_val_map: IdxValMap = dims
+        .iter()
+        .zip(index.iter().cloned())
+        .map(|(part, idx_val)| {
+            (
+                part.id
+                    .expect("need id in set domain when using setof expr"),
+                idx_val,
+            )
+        })
+        .collect();
+
+    // Get all index combinations from the domain
+    let domain_indexes = domain_to_indexes(&set_of.domain, lookups, &idx_val_map);
+
+    // Extract the integrand values for each domain element
+    let mut result = Vec::new();
+    for idx in domain_indexes {
+        // Build a map from domain vars to their values for this iteration
+        let iter_map: IdxValMap = set_of
+            .domain
+            .parts
+            .iter()
+            .zip(idx.iter())
+            .flat_map(|(part, val)| match &part.var {
+                DomainPartVar::Single(id) => vec![(*id, *val)],
+                DomainPartVar::Tuple(ids) => {
+                    // For tuple bindings, the val should be a Tuple
+                    match val {
+                        SetVal::Tuple([a, b]) => {
+                            let mut mappings = Vec::new();
+                            if let Some(id) = ids.first() {
+                                mappings.push((
+                                    *id,
+                                    match a {
+                                        SetValTerminal::Str(s) => SetVal::Str(*s),
+                                        SetValTerminal::Int(i) => SetVal::Int(*i),
+                                    },
+                                ));
+                            }
+                            if let Some(id) = ids.get(1) {
+                                mappings.push((
+                                    *id,
+                                    match b {
+                                        SetValTerminal::Str(s) => SetVal::Str(*s),
+                                        SetValTerminal::Int(i) => SetVal::Int(*i),
+                                    },
+                                ));
+                            }
+                            mappings
+                        }
+                        _ => vec![],
+                    }
+                }
+            })
+            .collect();
+
+        // Extract integrand value(s)
+        match &set_of.integrand {
+            DomainPartVar::Single(id) => {
+                if let Some(val) = idx_get(&iter_map, *id) {
+                    result.push(*val);
+                }
+            }
+            DomainPartVar::Tuple(ids) => {
+                // Build tuple from integrand vars
+                let vals: Vec<SetValTerminal> = ids
+                    .iter()
+                    .filter_map(|id| idx_get(&iter_map, *id))
+                    .map(|v| match v {
+                        SetVal::Str(s) => SetValTerminal::Str(*s),
+                        SetVal::Int(i) => SetValTerminal::Int(*i),
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                if vals.len() == 2 {
+                    result.push(SetVal::Tuple([vals[0], vals[1]]));
+                }
+            }
+        }
+    }
+
+    result.into()
 }
 
 fn intersect<T: Eq + std::hash::Hash + Clone>(vecs: Vec<Vec<T>>) -> Vec<T> {

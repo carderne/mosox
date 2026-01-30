@@ -54,3 +54,11 @@ cargo make run
 ## Docs
 
 - [Grammar](docs/GRAMMAR.md) - GMPL grammar specification and coverage
+
+## Todo
+
+- [ ] Support more than two-tuples in sets
+- [ ] Add regression test suite
+- [ ] Add fully worked examples
+- [ ] Add performance comparison suite
+- [ ] Add Highs integration
