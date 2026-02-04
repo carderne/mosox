@@ -6,6 +6,7 @@ mod gmpl;
 mod ir;
 mod matrix;
 mod mps;
+pub mod normalize;
 
 use std::path::Path;
 

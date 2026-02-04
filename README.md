@@ -115,14 +115,21 @@ The most useful dev commands are listed in `Makefile.toml`.
 
 You can view available commands by running `cargo make`.
 
-Run fmt, lint, check, test:
+### Formatting, linting
 ```bash
-cargo make ci
+cargo make fmt
+cargo make lint
 ```
 
-Run against the full Osemosys model and Atlantic data:
+### Testing
+In addition to other tests, this will run mosox against all the examples under `examples/` and confirm that the output is identical to the existing MPS files.
 ```bash
-cargo make run
+cargo make test
+```
+
+This will additionally run a regression test against `examples/osemosys_large` if present.
+```bash
+cargo make testlarge
 ```
 
 ## Docs

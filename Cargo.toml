@@ -21,7 +21,6 @@ smallvec = "1.15.1"
 
 [lib]
 name = "mosox"
-crate-type = ["cdylib", "lib"]
 
 [[bin]]
 name = "mosox"
@@ -31,10 +30,10 @@ path = "src/main.rs"
 debug = true
 
 # These add about a 5-10% speedup
-# codegen-units = 1
-# lto = "fat"
-# opt-level = 3
-# panic = "abort"
+codegen-units = 1
+lto = "fat"
+opt-level = 3
+panic = "abort"
 
 [dev-dependencies]
 assert_cmd = "2.0"

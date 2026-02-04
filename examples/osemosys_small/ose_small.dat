@@ -1,0 +1,540 @@
+# Downloaded from:
+# http://www.osemosys.org/uploads/1/8/5/0/18504136/atlantis_bau.txt
+
+###############
+#    Sets     #
+###############
+#
+set DAYTYPE := 1 ;
+set FUEL := CO DS EL_Distribution EL_Industry EL_Residential EL_Services EL_Transmission EL_Transport HF NG UR ;
+set MODE_OF_OPERATION := 1 2 ;
+set SEASON := 1 2 3 ;
+set DAILYTIMEBRACKET := 1 2 ;
+set EMISSION := CO2 NOx ;
+set REGION := Atl ;
+set YEAR := 2014 2015 ;
+set STORAGE := DAM ;
+set TIMESLICE := ID IN ;
+set TECHNOLOGY := CO_IMP CSP DIESEL_GEN DIST_IND DIST_RES DIST_SER DIST_TRA DS_IMP DSGC HF_IMP HFSC HYDRO_DAM HYDRO_MIN IGCC NG_IMP NGCC NGSC NUCLEAR PV_ROF PV_UTL TRANS UR_IMP WIND ;
+
+
+#####################
+#    Parameters     #
+#####################
+#
+param AccumulatedAnnualDemand default 0 :=
+;
+
+param AnnualEmissionLimit default 99999 :=
+;
+
+param AnnualExogenousEmission default 0 :=
+;
+
+param AvailabilityFactor default 1 :=
+;
+
+param CapacityFactor default 1 :=
+[Atl,CSP,*,*]:
+2014 2015 :=
+ID 0.28 0.28
+IN 0 0
+[Atl,HYDRO_DAM,*,*]:
+2014 2015 :=
+ID 0.45 0.45
+IN 0.45 0.45
+[Atl,HYDRO_MIN,*,*]:
+2014 2015 :=
+ID 0.4 0.4
+IN 0.4 0.4
+[Atl,PV_ROF,*,*]:
+2014 2015 :=
+ID 0.15 0.15
+IN 0 0
+[Atl,PV_UTL,*,*]:
+2014 2015 :=
+ID 0.15 0.15
+IN 0 0
+[Atl,WIND,*,*]:
+2014 2015 :=
+ID 0.25 0.25
+IN 0.25 0.25
+;
+
+param CapacityOfOneTechnologyUnit default 0 :=
+;
+
+param CapacityToActivityUnit default 1 :
+CO_IMP CSP DIESEL_GEN DIST_IND DIST_RES DIST_SER DIST_TRA DS_IMP DSGC HF_IMP HFSC HYDRO_DAM HYDRO_MIN IGCC NG_IMP NGCC NGSC NUCLEAR PV_ROF PV_UTL TRANS UR_IMP WIND:=
+Atl 1 31.536 31.536 1 1 1 1 1 31.536 1 31.536 31.536 31.536 31.536 1 31.536 31.536 31.536 31.536 31.536 1 1 31.536
+;
+
+param CapitalCost default 0 :=
+[Atl,*,*]:
+2014 2015 :=
+CSP 6000 6000
+DIESEL_GEN 1070 1070
+DSGC 900 900
+HFSC 2300 2300
+HYDRO_DAM 4000 4000
+HYDRO_MIN 4500 4500
+IGCC 3700 3700
+NGCC 1100 1100
+NGSC 2300 2300
+NUCLEAR 3000 3000
+PV_ROF 3500 3500
+PV_UTL 2000 2000
+WIND 1845 1808
+;
+
+param CapitalCostStorage default 0 :=
+;
+
+param Conversionld default 0 :
+1:=
+ID 1
+IN 1
+;
+
+param Conversionlh default 0 :
+1 2:=
+ID 1 0
+IN 0 1
+;
+
+param Conversionls default 0 :
+1 2 3:=
+ID 0 1 0
+IN 0 1 0
+;
+
+param DaySplit default 0.00137 :=
+;
+
+param DaysInDayType default 7 :=
+;
+
+param DepreciationMethod default 1 :=
+;
+
+param DiscountRate default 0.05 :=
+;
+
+param DiscountRateStorage default 0.05 :=
+;
+
+param EmissionActivityRatio default 0 :=
+[Atl,CO_IMP,CO2,*,*]:
+2014 2015 :=
+1 0.052 0.052
+2 0.052 0.052
+[Atl,DS_IMP,CO2,*,*]:
+2014 2015 :=
+1 0.0693 0.0693
+2 0.0693 0.0693
+[Atl,DSGC,NOx,*,*]:
+2014 2015 :=
+1 1.9444 1.9444
+2 1.9444 1.9444
+[Atl,HF_IMP,CO2,*,*]:
+2014 2015 :=
+1 0.0747 0.0747
+2 0.0747 0.0747
+[Atl,HFSC,NOx,*,*]:
+2014 2015 :=
+1 0.3611 0.3611
+2 0.3611 0.3611
+[Atl,IGCC,NOx,*,*]:
+2014 2015 :=
+1 0.0194 0.0194
+2 0.0194 0.0194
+[Atl,NG_IMP,CO2,*,*]:
+2014 2015 :=
+1 0.0503 0.0503
+2 0.0503 0.0503
+[Atl,NGCC,NOx,*,*]:
+2014 2015 :=
+1 0.05 0.05
+2 0.05 0.05
+[Atl,NGSC,NOx,*,*]:
+2014 2015 :=
+1 0.1389 0.1389
+2 0.1389 0.1389
+;
+
+param EmissionsPenalty default 0 :=
+;
+
+param FixedCost default 0 :=
+[Atl,*,*]:
+2014 2015 :=
+DIESEL_GEN 55 55
+DSGC 36 36
+HFSC 50 50
+HYDRO_DAM 60 60
+HYDRO_MIN 65 65
+IGCC 148 148
+NGCC 44 44
+NGSC 50 50
+TRANS 0.96 0.96
+;
+
+param InputActivityRatio default 0 :=
+[Atl,DIESEL_GEN,DS,*,*]:
+2014 2015 :=
+1 2.857 2.857
+2 2.857 2.857
+[Atl,DIST_IND,EL_Distribution,*,*]:
+2014 2015 :=
+1 1 1
+2 1 1
+[Atl,DIST_RES,EL_Distribution,*,*]:
+2014 2015 :=
+1 1 1
+2 1 1
+[Atl,DIST_SER,EL_Distribution,*,*]:
+2014 2015 :=
+1 1 1
+2 1 1
+[Atl,DIST_TRA,EL_Distribution,*,*]:
+2014 2015 :=
+1 1 1
+2 1 1
+[Atl,DSGC,DS,*,*]:
+2014 2015 :=
+1 6.57 6.57
+2 6.57 6.57
+[Atl,HFSC,HF,*,*]:
+2014 2015 :=
+1 2.174 2.174
+2 2.174 2.174
+[Atl,IGCC,CO,*,*]:
+2014 2015 :=
+1 2.083 2.083
+2 2.083 2.083
+[Atl,NGCC,NG,*,*]:
+2014 2015 :=
+1 1.992 1.992
+2 1.992 1.992
+[Atl,NGSC,NG,*,*]:
+2014 2015 :=
+1 2.174 2.174
+2 2.174 2.174
+[Atl,NUCLEAR,UR,*,*]:
+2014 2015 :=
+1 3.333 3.333
+2 3.333 3.333
+[Atl,TRANS,EL_Transmission,*,*]:
+2014 2015 :=
+1 1 1
+2 1 1
+;
+
+param MinStorageCharge default 0 :=
+;
+
+param ModelPeriodEmissionLimit default 99999 :=
+;
+
+param ModelPeriodExogenousEmission default 0 :=
+;
+
+param OperationalLife default 1 :
+CO_IMP CSP DIESEL_GEN DIST_IND DIST_RES DIST_SER DIST_TRA DS_IMP DSGC HF_IMP HFSC HYDRO_DAM HYDRO_MIN IGCC NG_IMP NGCC NGSC NUCLEAR PV_ROF PV_UTL TRANS UR_IMP WIND:=
+Atl 1 25 40 1 1 1 1 1 30 1 35 35 25 35 1 35 30 50 20 25 1 1 25
+;
+
+param OperationalLifeStorage default 0 :=
+;
+
+param OutputActivityRatio default 0 :=
+[Atl,CO_IMP,CO,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,CSP,EL_Transmission,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,DIESEL_GEN,EL_Distribution,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,DIST_IND,EL_Industry,*,*]:
+2014 2015 :=
+1 0.9676 0.9676
+[Atl,DIST_RES,EL_Residential,*,*]:
+2014 2015 :=
+1 0.9676 0.9676
+[Atl,DIST_SER,EL_Services,*,*]:
+2014 2015 :=
+1 0.9676 0.9676
+[Atl,DIST_TRA,EL_Transport,*,*]:
+2014 2015 :=
+1 0.9676 0.9676
+[Atl,DS_IMP,DS,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,DSGC,EL_Transmission,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,HF_IMP,HF,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,HFSC,EL_Transmission,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,HYDRO_DAM,EL_Transmission,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,HYDRO_MIN,EL_Transmission,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,IGCC,EL_Transmission,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,NG_IMP,NG,*,*]:
+2014 2015 :=
+1 1 1
+2 1 1
+[Atl,NGCC,EL_Transmission,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,NGSC,EL_Transmission,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,NUCLEAR,EL_Transmission,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,PV_UTL,EL_Transmission,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,TRANS,EL_Distribution,*,*]:
+2014 2015 :=
+1 0.9848 0.9848
+[Atl,UR_IMP,UR,*,*]:
+2014 2015 :=
+1 1 1
+[Atl,WIND,EL_Transmission,*,*]:
+2014 2015 :=
+1 1 1
+;
+
+param REMinProductionTarget default 0 :
+2014 2015 :=
+Atl 0 0
+;
+
+param RETagFuel default 0 :=
+[Atl,*,*]:
+2014 2015 :=
+EL_Residential 1 1
+EL_Transmission 1 1
+;
+
+param RETagTechnology default 0 :=
+[Atl,*,*]:
+2014 2015 :=
+CSP 1 1
+PV_ROF 1 1
+PV_UTL 1 1
+WIND 1 1
+;
+
+param ReserveMargin default 0 :
+2014 2015 :=
+Atl 1.18 1.18
+;
+
+param ReserveMarginTagFuel default 0 :=
+[Atl,*,*]:
+2014 2015 :=
+EL_Transmission 1 1
+;
+
+param ReserveMarginTagTechnology default 0 :=
+[Atl,*,*]:
+2014 2015 :=
+HFSC 0.5 0.5
+NGCC 1 1
+NGSC 1 1
+NUCLEAR 1 1
+;
+
+param ResidualCapacity default 0 :=
+[Atl,*,*]:
+2014 2015 :=
+DSGC 0.15 0.15
+HFSC 0.05 0.05
+HYDRO_DAM 0.04 0.04
+HYDRO_MIN 0.01 0.01
+IGCC 0.03 0.03
+NGSC 0.1 0.1
+;
+
+param ResidualStorageCapacity default 999 :=
+;
+
+param SpecifiedAnnualDemand default 0 :=
+[Atl,*,*]:
+2014 2015 :=
+EL_Industry 2.153 2.164
+EL_Residential 2.214 2.225
+EL_Services 1.538 1.545
+EL_Transport 0.246 0.247
+;
+
+param SpecifiedDemandProfile default 0 :=
+[Atl,EL_Industry,*,*]:
+2014 2015 :=
+ID 0.167 0.167
+IN 0.167 0.167
+[Atl,EL_Residential,*,*]:
+2014 2015 :=
+ID 0.12 0.12
+IN 0.08 0.08
+[Atl,EL_Services,*,*]:
+2014 2015 :=
+ID 0.26 0.26
+IN 0.07 0.07
+[Atl,EL_Transport,*,*]:
+2014 2015 :=
+ID 0.32 0.32
+IN 0.05 0.05
+;
+
+param StorageLevelStart default 0 :=
+;
+
+param StorageMaxChargeRate default 0 :=
+;
+
+param StorageMaxDischargeRate default 0 :=
+;
+
+param TechnologyFromStorage default 0 :=
+[Atl,HYDRO_DAM,*,*]:
+1 2:=
+DAM 1 0
+;
+
+param TechnologyToStorage default 0 :=
+[Atl,HYDRO_DAM,*,*]:
+1 2:=
+DAM 0 1
+;
+
+param TotalAnnualMaxCapacity default 99999 :=
+[Atl,*,*]:
+2014 2015 :=
+CSP 0 0
+DIESEL_GEN 0.5 0.5
+HFSC 0.5 0.5
+HYDRO_DAM 0.3 0.3
+HYDRO_MIN 0.5 0.5
+NGCC 0 0
+NUCLEAR 0 0
+PV_ROF 0 0
+PV_UTL 0 0
+WIND 0 0
+;
+
+param TotalAnnualMaxCapacityInvestment default 99999 :=
+;
+
+param TotalAnnualMinCapacity default 0 :=
+;
+
+param TotalAnnualMinCapacityInvestment default 0 :=
+;
+
+param TotalTechnologyAnnualActivityLowerLimit default 0 :=
+;
+
+param TotalTechnologyAnnualActivityUpperLimit default 99999 :=
+[Atl,*,*]:
+2014 2015 :=
+NUCLEAR 1 1
+WIND 1 1
+;
+
+param TotalTechnologyModelPeriodActivityLowerLimit default 0 :=
+;
+
+param TotalTechnologyModelPeriodActivityUpperLimit default 99999 :=
+;
+
+param TradeRoute default 0 :=
+;
+
+param VariableCost default 0 :=
+[Atl,CO_IMP,*,*]:
+2014 2015 :=
+1 5.556 5.556
+2 99999 99999
+[Atl,CSP,*,*]:
+2014 2015 :=
+1 46 46
+2 46 46
+[Atl,DIESEL_GEN,*,*]:
+2014 2015 :=
+2 3.34 3.34
+[Atl,DIST_IND,*,*]:
+2014 2015 :=
+1 0.12811 0.12811
+2 99999 99999
+[Atl,DIST_RES,*,*]:
+2014 2015 :=
+1 0.12811 0.12811
+2 99999 99999
+[Atl,DIST_SER,*,*]:
+2014 2015 :=
+1 0.12811 0.12811
+2 99999 99999
+[Atl,DIST_TRA,*,*]:
+2014 2015 :=
+1 0.12811 0.12811
+2 99999 99999
+[Atl,DS_IMP,*,*]:
+2014 2015 :=
+1 16.667 16.667
+2 99999 99999
+[Atl,HF_IMP,*,*]:
+2014 2015 :=
+1 13.652 8.357
+2 99999 99999
+[Atl,NG_IMP,*,*]:
+2014 2015 :=
+1 11.111 11.111
+2 99999 99999
+[Atl,NUCLEAR,*,*]:
+2014 2015 :=
+1 4.167 4.167
+2 4.167 4.167
+[Atl,PV_ROF,*,*]:
+2014 2015 :=
+1 20 20
+2 20 20
+[Atl,PV_UTL,*,*]:
+2014 2015 :=
+1 60 60
+2 60 60
+[Atl,TRANS,*,*]:
+2014 2015 :=
+1 0.081 0.081
+2 99999 99999
+[Atl,UR_IMP,*,*]:
+2014 2015 :=
+1 2.778 2.778
+2 99999 99999
+[Atl,WIND,*,*]:
+2014 2015 :=
+1 4.167 4.167
+2 4.167 4.167
+;
+
+param YearSplit default 0 :
+2014 2015 :=
+ID 0.5 0.5
+IN 0.5 0.5
+;
+
+#
+end;

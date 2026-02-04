@@ -21,6 +21,11 @@ args = ["clippy"]
 command = "cargo"
 args = ["test"]
 
+[tasks.testlarge]
+env = { MOSOX_TEST_LARGE = "1" }
+command = "cargo"
+args = ["test", "--release", "--test", "regression_test"]
+
 [tasks.ci]
 dependencies = [
     "fmt",
@@ -37,13 +42,6 @@ args = ["clean"]
 command = "cargo"
 args = ["build"]
 dependencies = ["clean"]
-
-# Run
-[tasks.run]
-description = "Run the model with debug logging"
-env = { RUST_LOG = "debug" }
-command = "cargo"
-args = ["run", "check", "examples/osemosys.mod", "examples/atlantis.dat"]
 
 # Coverage
 [tasks.test-cov]
