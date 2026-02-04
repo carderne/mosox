@@ -220,7 +220,7 @@ rel_op           =  { "<=" | "<>" | "<" | "==" | "=" | ">=" | ">" | "!=" }
 // Primitives
 name       = @{ id }
 id         = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
-number     = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? ~ (("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+)? }
+number     = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? ~ (("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+)? }
 int        = @{ ASCII_DIGIT+ }
 
 // String literal
