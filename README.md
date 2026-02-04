@@ -132,6 +132,33 @@ This will additionally run a regression test against `examples/osemosys_large` i
 cargo make testlarge
 ```
 
+### Benchmarks
+Run performance benchmarks across all examples (except `osemosys_large`):
+```bash
+cargo make bench
+```
+
+Include `osemosys_large` (requires the example to be present):
+```bash
+cargo make benchlarge
+```
+
+Run with `glpsol` comparison (requires `glpsol` on `PATH`):
+```bash
+cargo make benchglpsol
+```
+
+#### Performance vs glpsol (median, release build, Macbook Air M2)
+
+| Example           | N   | glpsol | mosox   | Speedup |
+|---------          |---  |--------|-------  |---------|
+| basic             | 200 | 2.0ms  | 1.9ms   | 1.1x    |
+| 2d_params         | 200 | 2.0ms  | 2.0ms   | 1.0x    |
+| sets              | 200 | 2.1ms  | 1.9ms   | 1.1x    |
+| osemosys_small    | 50  | 68.1ms | 17.0ms  | 4.0x    |
+| osemosys_atlantis | 10  | 2.4s   | 372.5ms | 6.5x    |
+| osemosys_large    | 4   | 130.3s | 20.0s   | 6.5x    |
+
 ## Docs
 
 - [Grammar](docs/GRAMMAR.md) - GMPL grammar specification and coverage
@@ -139,7 +166,7 @@ cargo make testlarge
 ## Todo
 
 - [ ] Support more than two-tuples in sets
-- [ ] Add regression test suite
-- [ ] Add fully worked examples
-- [ ] Add performance comparison suite
+- [x] Add regression test suite
+- [x] Add fully worked examples
+- [x] Add performance comparison suite
 - [ ] Add Highs integration
