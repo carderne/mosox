@@ -117,7 +117,7 @@ data_entry = _{
 
 // Data: Set
 SET_DATA         = { "set" ~ id ~ index? ~ set_data_assign? ~ ";" }
-set_data_assign  = { ":=" ~ (set_vals | set_tuples) }
+set_data_assign  = { ":=" ~ (set_vals | set_tuples)? }
 set_tuples       = { set_tuple+ }
 set_tuple        = { "(" ~ set_val ~ "," ~ set_val ~ ")" }
 set_vals         = { set_val+ }

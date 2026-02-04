@@ -1484,8 +1484,10 @@ fn parse_set_vals_or_tuples(pair: Pair<Rule>) -> SetVals {
 
 /// Parse set_assign (`:= ...`) into SetVals (used by SetData in data section)
 fn parse_set_assign(pair: Pair<Rule>) -> SetVals {
-    let inner = pair.into_inner().next().unwrap();
-    parse_set_vals_or_tuples(inner)
+    match pair.into_inner().next() {
+        Some(inner) => parse_set_vals_or_tuples(inner),
+        None => SetVals(vec![]),
+    }
 }
 
 /// Parse param_data_body into ParamDataBody (reused by Param and ParamData)
