@@ -2,9 +2,15 @@
 
 An LP matrix generator for GMPL (GNU MathProg).
 
+Can be used in two ways:
+- Generate an MPS file for solving elsewhere
+- Solve directly with the [HiGHS](https://highs.dev/) integration, no other binary needed
+
 **Currently a work-in-progress.**
 
-It works for a subset of GMPL (specifically the subset required to run [Osemosys](https://osemosys.github.io/)). The goal is to full coverage of GMPL and compatibility with GLPK, but this may take a while.
+It works for a subset of GMPL (specifically the subset required to run [Osemosys](https://osemosys.github.io/)).
+The goal is to full coverage of GMPL and compatibility with GLPK, but this may take a while.
+See [Known limitations](#known-limitations) section below.
 
 ## Quickstart
 
