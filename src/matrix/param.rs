@@ -11,6 +11,7 @@ pub enum ParamVal {
     Arr(HashMap<Index, f64>),
     Scalar(f64),
     Expr(Expr),
+    Symbolic,
     None,
 }
 
@@ -66,6 +67,10 @@ pub fn resolve_param(param: ParamWithData) -> Param {
                     default,
                 }
             }
+            ParamDataBody::Symbolic(_) => Param {
+                data: ParamVal::Symbolic,
+                default,
+            },
         }
     } else if let Some(ParamAssign::Expr(expr)) = param.decl.assign {
         Param {

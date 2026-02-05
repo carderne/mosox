@@ -569,6 +569,7 @@ pub enum ParamDataBody {
     Tables(Vec<ParamDataTable>),
     List(Vec<ParamDataPair>),
     Num(f64),
+    Symbolic(String),
 }
 
 #[derive(Clone, Debug)]
@@ -618,6 +619,9 @@ impl fmt::Display for ParamData {
             }
             Some(ParamDataBody::Num(num)) => {
                 write!(f, " := {}", num)?;
+            }
+            Some(ParamDataBody::Symbolic(s)) => {
+                write!(f, " := \"{}\"", s)?;
             }
             None => {}
         }
@@ -1525,6 +1529,11 @@ fn parse_param_data_body(pair: Pair<Rule>) -> ParamDataBody {
         Rule::param_data_scalar => {
             let num: f64 = first.as_str().parse().unwrap();
             ParamDataBody::Num(num)
+        }
+        Rule::param_data_symbolic => {
+            let s = first.as_str();
+            let unquoted = s[1..s.len() - 1].to_string();
+            ParamDataBody::Symbolic(unquoted)
         }
         _ => unreachable!(),
     }

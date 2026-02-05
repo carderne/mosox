@@ -133,9 +133,8 @@ PARAM_DATA          =  {
     "param" ~ id ~ simple_domain? ~ ("default" ~ param_data_default)? ~ ":="? ~ param_data_body? ~ ";"
 }
 param_data_default  = @{ number }
-param_data_body =      { param_data_matrix+ | param_data_list | param_data_scalar }
-// We don't support using "list" format for 2D params
-// As there's no way to unambiguously parse in PEST (needs post-processing)
+param_data_body =      { param_data_symbolic | param_data_matrix+ | param_data_list | param_data_scalar }
+param_data_symbolic = @{ string_literal }
 param_data_scalar   = @{ number }
 param_data_list     =  { param_data_pair+ }
 param_data_pair     =  { set_val ~ number ~ ","? }

@@ -75,6 +75,9 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                         Some(expr) => recurse(expr, lookups, idx_val_map),
                         None => panic!("tried to get uninitialized param"),
                     },
+                    ParamVal::Symbolic => {
+                        panic!("symbolic params are not supported in constraint evaluation")
+                    }
                 }
             } else if let Some(index_val) = idx_get(idx_val_map, *name) {
                 // Use the current index value (eg y=>2014) as an actual value
