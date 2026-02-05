@@ -10,31 +10,36 @@ use lasso::Spur;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use smallvec::SmallVec;
 
-use crate::ir::Index;
 use crate::ir::model::{ConstraintOrObjective, ModelWithData};
 use crate::ir::op::{Bounds, RowType};
+use crate::ir::{Index, ObjSense};
 use crate::matrix::constraint::{Pair, algebra, domain_to_indexes, get_index_map, recurse};
 use crate::matrix::lookup::Lookups;
+
+pub type ConId = (Spur, Arc<Index>);
+pub type VarId = (Spur, Arc<Index>);
 
 pub struct VarWithCoefficients {
     pub bounds: Bounds,
     /// coeffs is a map of (constraint_name, constraint_index) -> coefficient
-    pub coeffs: IndexMap<(Spur, Arc<Index>), f64>,
+    pub coeffs: IndexMap<ConId, f64>,
 }
 
 /// VarsMap is a map of (var_name, var_index) -> var bounds & coefficients
-pub(crate) type VarsMap = IndexMap<(Spur, Arc<Index>), VarWithCoefficients>;
+pub(crate) type VarsMap = IndexMap<VarId, VarWithCoefficients>;
 /// ConsMap is an array of (constraint_name, constraint_index, row_type, rhs)
-pub(crate) type ConsMap = Vec<(Spur, Arc<Index>, RowType, f64)>;
+pub(crate) type ConsMap = Vec<(ConId, RowType, f64)>;
 
 /// The compiled matrix with vars (cols) and cons (rows).
 pub struct Compiled {
-    pub vars: VarsMap,
-    pub cons: ConsMap,
+    pub sense: ObjSense,
+    pub vars: VarsMap, // cols
+    pub cons: ConsMap, // rows
 }
 
 pub fn gen_matrix(model: ModelWithData) -> Compiled {
     let ModelWithData {
+        sense,
         sets,
         pars,
         vars,
@@ -42,10 +47,14 @@ pub fn gen_matrix(model: ModelWithData) -> Compiled {
     } = model;
     let lookups = Lookups::from_model(sets, vars, pars);
     let cons = build_constraints(constraints, &lookups);
-    build_cols_and_rows(cons, &lookups)
+    build_cols_and_rows(sense, cons, &lookups)
 }
 
-fn build_cols_and_rows(cons: Vec<SolvedConstraint>, lookups: &Lookups) -> Compiled {
+fn build_cols_and_rows(
+    sense: ObjSense,
+    cons: Vec<SolvedConstraint>,
+    lookups: &Lookups,
+) -> Compiled {
     let mut rows: ConsMap = vec![];
     let mut cols: VarsMap = IndexMap::new();
     for SolvedConstraint {
@@ -56,7 +65,7 @@ fn build_cols_and_rows(cons: Vec<SolvedConstraint>, lookups: &Lookups) -> Compil
         pairs,
     } in cons
     {
-        rows.push((name, idx.clone(), row_type, rhs));
+        rows.push(((name, idx.clone()), row_type, rhs));
         for pair in pairs {
             cols.entry((pair.var, Arc::new(pair.index)))
                 .or_insert_with(|| VarWithCoefficients {
@@ -73,6 +82,7 @@ fn build_cols_and_rows(cons: Vec<SolvedConstraint>, lookups: &Lookups) -> Compil
     }
 
     Compiled {
+        sense,
         vars: cols,
         cons: rows,
     }

@@ -1,0 +1,4 @@
+data;
+set PRODUCTS := A B C;
+param profit := A 50  B 30  C 40;
+end;

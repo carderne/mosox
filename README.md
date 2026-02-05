@@ -6,6 +6,135 @@ An LP matrix generator for GMPL (GNU MathProg).
 
 It works for a subset of GMPL (specifically the subset required to run [Osemosys](https://osemosys.github.io/)). The goal is to full coverage of GMPL and compatibility with GLPK, but this may take a while.
 
+## Quickstart
+
+### Installation
+#### Using Cargo
+```bash
+cargo install mosox
+```
+
+#### Using Homebrew (macOS)
+```bash
+brew tap carderne/mosox-tap
+brew install mosox
+```
+
+#### Pre-built binaries (macOS, Windows, Linux)
+Binaries are built for a small set of systems and architectures.
+Available to download (compressed) from the [Releases page](https://github.com/carderne/mosox/releases).
+Please choose the appropriate archive.
+
+### Usage overview
+
+Usage overview:
+```bash
+> mosox help
+
+MathProg Translation Kit
+
+Usage: mosox <COMMAND>
+
+Commands:
+  check     Check for errors and quit
+  generate  Load and output to MPS
+  solve      Solve with HiGHS
+  normalize  Normalize an MPS file for diffing
+  compare    Compare two normalized MPS files with epsilon tolerance
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+### Generate MPS
+Generate MPS for one of the examples in this repo.
+Output will be written to stdout.
+```bash
+mosox generate examples/basic/model.mod
+```
+
+Or an example with a separate data file, piping MPS to a file:
+```bash
+mosox generate examples/sets/model.mod examples/sets/data.dat > output.mps
+```
+
+### Solve a model
+Results summary will be printed to stdout.
+```bash
+mosox solve examples/basic/model.mod
+
+# output
+OBJECTIVE VALUE
+2200.000
+
+CONSTRAINTS
+labor = 100.000; marginal = 16.667
+material = 80.000; marginal = 6.667
+
+VARS
+x1 = 40.000; marginal = -0.000
+x2 = 20.000; marginal = -0.000
+```
+
+
+
+## Development
+Please install [cargo-make](https://github.com/sagiegurari/cargo-make):
+```bash
+cargo install cargo-make
+```
+
+The most useful dev commands are listed in `Makefile.toml`.
+
+You can view available commands by running `cargo make`.
+
+### Formatting, linting
+```bash
+cargo make fmt
+cargo make lint
+```
+
+### Testing
+In addition to other tests, this will run mosox against all the examples under `examples/` and confirm that the output is identical to the existing MPS files.
+```bash
+cargo make test
+```
+
+This will additionally run a regression test against `examples/osemosys_large` if present.
+```bash
+cargo make testlarge
+```
+
+### Benchmarks
+Run performance benchmarks across all examples (except `osemosys_large`):
+```bash
+cargo make bench
+```
+
+Include `osemosys_large` (requires the example to be present):
+```bash
+cargo make benchlarge
+```
+
+Run with `glpsol` comparison (requires `glpsol` on `PATH`):
+```bash
+cargo make benchglpsol
+```
+
+#### Performance vs glpsol (median, release build, Macbook Air M2)
+Note that some of the performance advantage over glpsol may be caused by the limitations enumerated below.
+
+| Example           | N   | glpsol | mosox   | Speedup |
+|---------          |---  |--------|-------  |---------|
+| basic             | 200 | 2.0ms  | 1.9ms   | 1.1x    |
+| 2d_params         | 200 | 2.0ms  | 2.0ms   | 1.0x    |
+| sets              | 200 | 2.1ms  | 1.9ms   | 1.1x    |
+| osemosys_small    | 50  | 68.1ms | 17.0ms  | 4.0x    |
+| osemosys_atlantis | 10  | 2.4s   | 372.5ms | 6.5x    |
+| osemosys_large    | 4   | 130.3s | 20.0s   | 6.5x    |
+
 ## Known limitations
 Hopefully this list is shorter then the "supported feature" list!
 
@@ -60,113 +189,3 @@ These are parsed but are otherwise ignored:
 - Display statement
 - Printf statement
 - For statement
-
-## Quickstart
-
-### Installation
-#### Using Cargo
-```bash
-cargo install mosox
-```
-
-#### Using Homebrew (macOS)
-```bash
-brew tap carderne/mosox-tap
-brew install mosox
-```
-
-#### Pre-built binaries (macOS, Windows, Linux)
-Binaries are built for a small set of systems and architectures.
-Available to download (compressed) from the [Releases page](https://github.com/carderne/mosox/releases).
-Please choose the appropriate archive.
-
-### Usage overview
-
-Usage overview:
-```bash
-> mosox help
-
-MathProg Translation Kit
-
-Usage: mosox <COMMAND>
-
-Commands:
-  check     Check for errors and quit
-  generate  Load and output to MPS
-  help      Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help     Print help
-  -V, --version  Print version
-```
-
-Generate MPS for a model and data file pair:
-```bash
-mosox generate model.mod data.dat > output_file.mps
-```
-
-## Development
-Please install [cargo-make](https://github.com/sagiegurari/cargo-make):
-```bash
-cargo install cargo-make
-```
-
-The most useful dev commands are listed in `Makefile.toml`.
-
-You can view available commands by running `cargo make`.
-
-### Formatting, linting
-```bash
-cargo make fmt
-cargo make lint
-```
-
-### Testing
-In addition to other tests, this will run mosox against all the examples under `examples/` and confirm that the output is identical to the existing MPS files.
-```bash
-cargo make test
-```
-
-This will additionally run a regression test against `examples/osemosys_large` if present.
-```bash
-cargo make testlarge
-```
-
-### Benchmarks
-Run performance benchmarks across all examples (except `osemosys_large`):
-```bash
-cargo make bench
-```
-
-Include `osemosys_large` (requires the example to be present):
-```bash
-cargo make benchlarge
-```
-
-Run with `glpsol` comparison (requires `glpsol` on `PATH`):
-```bash
-cargo make benchglpsol
-```
-
-#### Performance vs glpsol (median, release build, Macbook Air M2)
-
-| Example           | N   | glpsol | mosox   | Speedup |
-|---------          |---  |--------|-------  |---------|
-| basic             | 200 | 2.0ms  | 1.9ms   | 1.1x    |
-| 2d_params         | 200 | 2.0ms  | 2.0ms   | 1.0x    |
-| sets              | 200 | 2.1ms  | 1.9ms   | 1.1x    |
-| osemosys_small    | 50  | 68.1ms | 17.0ms  | 4.0x    |
-| osemosys_atlantis | 10  | 2.4s   | 372.5ms | 6.5x    |
-| osemosys_large    | 4   | 130.3s | 20.0s   | 6.5x    |
-
-## Docs
-
-- [Grammar](docs/GRAMMAR.md) - GMPL grammar specification and coverage
-
-## Todo
-
-- [ ] Support more than two-tuples in sets
-- [x] Add regression test suite
-- [x] Add fully worked examples
-- [x] Add performance comparison suite
-- [ ] Add Highs integration

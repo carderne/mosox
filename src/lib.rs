@@ -3,6 +3,7 @@
 //! `mosox` is a GMPL parser and matrix generator.
 
 mod gmpl;
+mod highs;
 mod ir;
 mod matrix;
 mod mps;
@@ -11,6 +12,7 @@ pub mod normalize;
 use std::path::Path;
 
 use crate::gmpl::loader;
+use crate::highs::highs_solve;
 use crate::ir::Entry;
 use crate::ir::model::ModelWithData;
 use crate::matrix::{Compiled, gen_matrix};
@@ -57,6 +59,11 @@ pub fn generate_matrix(model: ModelWithData) -> Compiled {
 /// Print matrix in MPS format to stdout.
 pub fn matrix_to_mps(compiled: Compiled, model_name: &str) {
     print_mps(compiled, model_name);
+}
+
+/// Solve the compiled matrix with Highs
+pub fn solve_matrix(compiled: Compiled) {
+    highs_solve(compiled)
 }
 
 /// Get the stem from a path.

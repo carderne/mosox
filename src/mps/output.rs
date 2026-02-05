@@ -2,9 +2,9 @@ use std::io::{BufWriter, Write};
 
 use crate::{
     ir::{
-        Index,
         interner::intern_resolve,
-        op::{BoundsOp, RowType},
+        op::{Bounds, RowType},
+        write_index_vals,
     },
     matrix::{Compiled, ConsMap, VarsMap},
 };
@@ -24,7 +24,7 @@ pub fn print_mps(compiled: Compiled, model_name: &str) {
 
 fn write_con_rows(w: &mut impl Write, rows: &ConsMap) {
     writeln!(w, "ROWS").unwrap();
-    for (name, idx, dir, _) in rows {
+    for ((name, idx), dir, _) in rows {
         let name = intern_resolve(*name);
         write!(w, " {dir}  {name}").unwrap();
         write_index_vals(w, idx);
@@ -51,7 +51,7 @@ fn write_var_cols(w: &mut impl Write, cols: &VarsMap) {
 
 fn write_con_rhs(w: &mut impl Write, rows: &ConsMap) {
     writeln!(w, "RHS").unwrap();
-    for (name, idx, row_type, val) in rows {
+    for ((name, idx), row_type, val) in rows {
         // Skip N-type rows (objective function) - they should never have RHS
         if *row_type == RowType::Unconstrained {
             continue;
@@ -71,35 +71,20 @@ fn write_var_bounds(w: &mut impl Write, vars: &VarsMap) {
     writeln!(w, "BOUNDS").unwrap();
 
     for ((var_name, var_idx), var) in vars {
-        if var.bounds.op == BoundsOp::Lower && var.bounds.val == Some(0.0) {
+        if let Bounds::Lower(v) = var.bounds
+            && v == 0.0
+        {
             // exclude vars with >= 0, as that is default in MPS
             continue;
         }
 
         let var_name = intern_resolve(*var_name);
-        write!(w, " {} BND1 {var_name}", var.bounds.op).unwrap();
+        write!(w, " {} BND1 {var_name}", var.bounds).unwrap();
         write_index_vals(w, var_idx);
 
-        match var.bounds.val {
-            Some(val) => writeln!(w, " {val}").unwrap(),
-            None => writeln!(w).unwrap(),
-        };
-    }
-}
-
-/// Write index values directly to the buffer, avoiding String allocation
-#[inline]
-fn write_index_vals(w: &mut impl Write, v: &Index) {
-    if !v.is_empty() {
-        write!(w, "[").unwrap();
-        let mut first = true;
-        for item in v.iter() {
-            if !first {
-                write!(w, ",").unwrap();
-            }
-            first = false;
-            write!(w, "{item}").unwrap();
+        match var.bounds {
+            Bounds::Free => writeln!(w).unwrap(),
+            Bounds::Lower(v) | Bounds::Upper(v) | Bounds::Fixed(v) => writeln!(w, " {v}").unwrap(),
         }
-        write!(w, "]").unwrap();
     }
 }

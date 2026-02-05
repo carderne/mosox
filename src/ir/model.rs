@@ -5,8 +5,8 @@ use lasso::Spur;
 use smallvec::smallvec;
 
 use crate::ir::{
-    Constraint, ConstraintExpr, Domain, Entry, Expr, Objective, Param, ParamAssign, ParamData, Set,
-    SetData, SetVal, SetValTerminal, SetVals, Var, intern_resolve, op::RowType,
+    Constraint, ConstraintExpr, Domain, Entry, Expr, ObjSense, Objective, Param, ParamAssign,
+    ParamData, Set, SetData, SetVal, SetValTerminal, SetVals, Var, intern_resolve, op::RowType,
 };
 
 /// A set declaration with optional data
@@ -67,6 +67,7 @@ impl fmt::Display for ConstraintOrObjective {
 
 #[derive(Clone, Debug)]
 pub struct ModelWithData {
+    pub sense: ObjSense,
     pub sets: Vec<SetWithData>,
     pub vars: Vec<Var>,
     pub pars: Vec<ParamWithData>,
@@ -209,9 +210,13 @@ impl ModelWithData {
             });
         }
 
-        let all_constraints = prep_constraints(objective.unwrap(), constraints);
+        let objective = objective.expect("no objective function!");
+        let sense = objective.sense;
+
+        let all_constraints = prep_constraints(objective, constraints);
 
         ModelWithData {
+            sense,
             sets: matched_sets,
             pars: matched_params,
             vars,

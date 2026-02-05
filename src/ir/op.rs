@@ -6,56 +6,47 @@ use std::fmt;
 use crate::ir::{self, RelOp};
 
 #[derive(Copy, Clone, Debug)]
-pub struct Bounds {
-    pub op: BoundsOp,
-    pub val: Option<f64>,
+pub enum Bounds {
+    Free,
+    Lower(f64),
+    Upper(f64),
+    Fixed(f64),
 }
 
 impl Bounds {
     pub fn from_gmpl_bounds(bounds: Option<ir::VarBounds>) -> Self {
         match bounds {
-            Some(bounds) => Bounds {
-                op: BoundsOp::from_rel_op(&bounds.op),
-                val: Some(bounds.value),
+            Some(bounds) => match bounds.op {
+                ir::RelOp::Lt => panic!("Less than not supported"),
+                ir::RelOp::Le => Self::Upper(bounds.value),
+                ir::RelOp::Eq => Self::Fixed(bounds.value),
+                ir::RelOp::EqEq => Self::Fixed(bounds.value),
+                ir::RelOp::Ne => panic!("Not equal not supported"),
+                ir::RelOp::Ne2 => panic!("Not equal not supported"),
+                ir::RelOp::Ge => Self::Lower(bounds.value),
+                ir::RelOp::Gt => panic!("Greater than not supported"),
             },
-            None => Bounds {
-                op: BoundsOp::Free,
-                val: None,
-            },
+            None => Self::Free,
+        }
+    }
+
+    pub fn to_range(self) -> std::ops::RangeInclusive<f64> {
+        match self {
+            Self::Free => f64::NEG_INFINITY..=f64::INFINITY,
+            Self::Lower(v) => v..=f64::INFINITY,
+            Self::Upper(v) => f64::NEG_INFINITY..=v,
+            Self::Fixed(v) => v..=v,
         }
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum BoundsOp {
-    Free,
-    Lower,
-    Upper,
-    Fixed,
-}
-
-impl BoundsOp {
-    pub fn from_rel_op(op: &ir::RelOp) -> Self {
-        match op {
-            ir::RelOp::Lt => panic!("Less than not supported"),
-            ir::RelOp::Le => BoundsOp::Upper,
-            ir::RelOp::Eq => BoundsOp::Fixed,
-            ir::RelOp::EqEq => BoundsOp::Fixed,
-            ir::RelOp::Ne => panic!("Not equal not supported"),
-            ir::RelOp::Ne2 => panic!("Not equal not supported"),
-            ir::RelOp::Ge => BoundsOp::Lower,
-            ir::RelOp::Gt => panic!("Greater than not supported"),
-        }
-    }
-}
-
-impl fmt::Display for BoundsOp {
+impl fmt::Display for Bounds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            BoundsOp::Free => write!(f, "FR"),
-            BoundsOp::Lower => write!(f, "LO"),
-            BoundsOp::Upper => write!(f, "UP"),
-            BoundsOp::Fixed => write!(f, "FX"),
+            Self::Free => write!(f, "FR"),
+            Self::Lower(_) => write!(f, "LO"),
+            Self::Upper(_) => write!(f, "UP"),
+            Self::Fixed(_) => write!(f, "FX"),
         }
     }
 }
@@ -91,6 +82,15 @@ impl RowType {
             RelOp::Ne2 => panic!("Not equal not supported"),
             RelOp::Ge => RowType::GreaterThanOrEqual,
             RelOp::Gt => panic!("Greater than not supported"),
+        }
+    }
+
+    pub fn to_range(self, rhs: f64) -> std::ops::RangeInclusive<f64> {
+        match self {
+            Self::LessThanOrEqual => f64::NEG_INFINITY..=rhs,
+            Self::GreaterThanOrEqual => rhs..=f64::INFINITY,
+            Self::Equal => rhs..=rhs,
+            Self::Unconstrained => f64::NEG_INFINITY..=f64::INFINITY,
         }
     }
 }
