@@ -219,8 +219,14 @@ rel_op           =  { "<=" | "<>" | "<" | "==" | "=" | ">=" | ">" | "!=" }
 // Primitives
 name       = @{ id }
 id         = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
-number     = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? ~ (("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+)? }
 int        = @{ ASCII_DIGIT+ }
+
+// float1 and float2 is to handle all of: 1.2, 1., .2
+// (Just doing DIGIT* "."? DIGIT* captures anything so doesn't work
+number     = @{ "-"? ~ (float1 | float2) ~ exponent? }
+float1     = @{ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? }
+float2     = @{ "." ~ ASCII_DIGIT+ }
+exponent   = @{ ("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+ }
 
 // String literal
 string_literal =  { single_quoted | double_quoted }
