@@ -1,5 +1,6 @@
-use log::debug;
+use anyhow::{Context, Result};
 use pest::Parser;
+use pest::error::LineColLocation;
 use pest::iterators::Pairs;
 
 use crate::{
@@ -8,72 +9,52 @@ use crate::{
 };
 
 /// Parse the text using Pest
-pub fn parse(data: &str) -> Pairs<'_, Rule> {
-    let mut entries = ModelParser::parse(Rule::root, data).unwrap();
+pub fn parse(data: &str) -> Result<Pairs<'_, Rule>> {
+    let mut entries = ModelParser::parse(Rule::root, data).map_err(|e| {
+        let (line, col) = match e.line_col {
+            LineColLocation::Pos((l, c)) => (l, c),
+            LineColLocation::Span((l, c), _) => (l, c),
+        };
+        anyhow::anyhow!("Syntax error at line {}, column {}:\n{}", line, col, e)
+    })?;
 
-    // There will always be at least an "EOI", so this will not error
-    let entry = entries.next().unwrap();
-    entry.into_inner()
+    let entry = entries
+        .next()
+        .context("File did not even contain an EOI, didn't think this was possible.")?;
+    Ok(entry.into_inner())
 }
 
 /// Convert the AST Pest Pairs into a IR
 pub fn consume(entries: Pairs<'_, Rule>) -> Vec<Entry> {
-    let mut dirs: Vec<Entry> = Vec::new();
-    for entry in entries {
-        match entry.as_rule() {
-            // Model rules
-            Rule::VAR => {
-                debug!("VAR");
-                dirs.push(Entry::Var(ir::Var::from_entry(entry)));
-            }
-            Rule::PARAM => {
-                debug!("PARAM");
-                dirs.push(Entry::Param(ir::Param::from_entry(entry)));
-            }
-            Rule::SET => {
-                debug!("SET");
-                dirs.push(Entry::Set(ir::Set::from_entry(entry)));
-            }
-            Rule::OBJECTIVE => {
-                debug!("OBJ");
-                dirs.push(Entry::Objective(ir::Objective::from_entry(entry)));
-            }
-            Rule::CONSTRAINT => {
-                debug!("ST");
-                dirs.push(Entry::Constraint(ir::Constraint::from_entry(entry)));
-            }
-
-            // Data rules
-            Rule::SET_DATA => {
-                debug!("DATA:SET");
-                dirs.push(Entry::DataSet(ir::SetData::from_entry(entry)));
-            }
-            Rule::PARAM_DATA => {
-                debug!("DATA:PARAM");
-                dirs.push(Entry::DataParam(ir::ParamData::from_entry(entry)));
-            }
-
-            // Ignored
-            Rule::END => {}
-            Rule::EOI => {}
-            Rule::PRINT => {}
-            Rule::DISPLAY => {}
-            Rule::CHECK => {}
-            Rule::SOLVE => {}
-            Rule::FOR => {}
-            Rule::TABLE => {}
-            Rule::COMMENT => {}
-
-            // Catch-all
+    entries
+        .into_iter()
+        .filter_map(|entry| match entry.as_rule() {
+            Rule::VAR => Some(Entry::Var(ir::Var::from_entry(entry))),
+            Rule::PARAM => Some(Entry::Param(ir::Param::from_entry(entry))),
+            Rule::SET => Some(Entry::Set(ir::Set::from_entry(entry))),
+            Rule::OBJECTIVE => Some(Entry::Objective(ir::Objective::from_entry(entry))),
+            Rule::CONSTRAINT => Some(Entry::Constraint(ir::Constraint::from_entry(entry))),
+            Rule::SET_DATA => Some(Entry::DataSet(ir::SetData::from_entry(entry))),
+            Rule::PARAM_DATA => Some(Entry::DataParam(ir::ParamData::from_entry(entry))),
+            Rule::END
+            | Rule::EOI
+            | Rule::PRINT
+            | Rule::DISPLAY
+            | Rule::CHECK
+            | Rule::SOLVE
+            | Rule::FOR
+            | Rule::TABLE
+            | Rule::COMMENT => None,
             _ => {
                 let (line, _) = entry.line_col();
-                let rule = entry.as_rule();
-                let text = entry.as_str();
-                unreachable!("unexpected: {line} rule: {rule:?}\ntext: {text}");
+                unreachable!(
+                    "unexpected: {line} rule: {:?}\ntext: {}",
+                    entry.as_rule(),
+                    entry.as_str()
+                );
             }
-        };
-    }
-    dirs
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -91,7 +72,7 @@ mod tests {
         let text = r#"
             INVALID MODEL STUFF
         "#;
-        let entries = parse(&text);
+        let entries = parse(&text).unwrap();
         assert!(entries.len() == 1);
     }
 
@@ -100,7 +81,7 @@ mod tests {
         let text = r#"
             param DiscountRate{r in REGION};
         "#;
-        let entries = parse(&text);
+        let entries = parse(&text).unwrap();
         consume(entries);
     }
 }

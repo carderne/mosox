@@ -50,11 +50,7 @@ enum Commands {
     },
 }
 
-fn set_exit() -> ExitCode {
-    ExitCode::SUCCESS
-}
-
-fn main() -> ExitCode {
+fn run() -> anyhow::Result<()> {
     env_logger::init();
     let cli = Cli::parse();
     match &cli.command {
@@ -63,34 +59,34 @@ fn main() -> ExitCode {
             data_path,
             verbose,
         } => {
-            let entries = load_model_and_data(path, data_path.as_deref());
+            let entries = load_model_and_data(path, data_path.as_deref())?;
             let model = merge_model(entries);
 
             // Print the model
             if *verbose {
                 println!("{:#?}", model);
             }
-            set_exit()
+            Ok(())
         }
         Commands::Generate { path, data_path } => {
-            let entries = load_model_and_data(path, data_path.as_deref());
+            let entries = load_model_and_data(path, data_path.as_deref())?;
             let model = merge_model(entries);
             let compiled = generate_matrix(model);
             matrix_to_mps(compiled, stem(path));
-            set_exit()
+            Ok(())
         }
         Commands::Solve { path, data_path } => {
-            let entries = load_model_and_data(path, data_path.as_deref());
+            let entries = load_model_and_data(path, data_path.as_deref())?;
             let model = merge_model(entries);
             let compiled = generate_matrix(model);
             solve_matrix(compiled);
-            set_exit()
+            Ok(())
         }
         Commands::Normalize { input, output } => {
             let reader = BufReader::new(File::open(input).expect("cannot open input file"));
             let writer = BufWriter::new(File::create(output).expect("cannot create output file"));
             mosox::normalize::normalize_mps(reader, writer);
-            set_exit()
+            Ok(())
         }
         Commands::Compare {
             expected,
@@ -117,7 +113,16 @@ fn main() -> ExitCode {
                 }
                 println!("\n{} total differences", diffs.len());
             }
-            set_exit()
+            Ok(())
         }
+    }
+}
+
+fn main() -> ExitCode {
+    if let Err(e) = run() {
+        eprintln!("Error: {e:#}"); // {:#} prints full error chain
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
