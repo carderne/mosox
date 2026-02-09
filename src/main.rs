@@ -9,7 +9,9 @@ use clap::{Parser, Subcommand};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 
-use mosox::{generate_matrix, load_model_and_data, matrix_to_mps, merge_model, solve_matrix, stem};
+use mosox::{
+    Format, generate_matrix, load_model_and_data, matrix_to_mps, merge_model, solve_matrix, stem,
+};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -35,6 +37,8 @@ enum Commands {
     Solve {
         path: String,
         data_path: Option<String>,
+        #[arg(short, long, default_value_t = Format::Txt)]
+        format: Format,
     },
     /// Normalize an MPS file for diffing
     Normalize { input: String, output: String },
@@ -63,11 +67,15 @@ fn run() -> anyhow::Result<()> {
             matrix_to_mps(compiled, stem(path));
             Ok(())
         }
-        Commands::Solve { path, data_path } => {
+        Commands::Solve {
+            path,
+            data_path,
+            format,
+        } => {
             let entries = load_model_and_data(path, data_path.as_deref())?;
             let model = merge_model(entries);
             let compiled = generate_matrix(model);
-            solve_matrix(compiled);
+            solve_matrix(compiled, format.clone());
             Ok(())
         }
         Commands::Normalize { input, output } => {

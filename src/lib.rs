@@ -15,6 +15,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 
 use crate::gmpl::loader;
+pub use crate::highs::Format;
 use crate::highs::highs_solve;
 use crate::ir::Entry;
 use crate::ir::model::ModelWithData;
@@ -75,10 +76,10 @@ pub fn matrix_to_mps(compiled: Compiled, model_name: &str) {
 }
 
 /// Solve the compiled matrix with Highs
-pub fn solve_matrix(compiled: Compiled) {
+pub fn solve_matrix(compiled: Compiled, format: Format) {
     eprintln!("Solving matrix with HiGHS");
     let t0 = Instant::now();
-    highs_solve(compiled);
+    highs_solve(compiled, format);
     eprintln!("Solved in {:?}", t0.elapsed());
     eprintln!("Results output to stdout");
 }
