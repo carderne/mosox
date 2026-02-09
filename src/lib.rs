@@ -10,6 +10,7 @@ mod mps;
 pub mod normalize;
 
 use std::path::Path;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 
@@ -41,9 +42,13 @@ pub fn load_data(path: &str) -> Result<Vec<Entry>> {
 
 /// Load model and data, calling `load_model` and `load_data`.
 pub fn load_model_and_data(path: &str, data_path: Option<&str>) -> Result<Vec<Entry>> {
+    eprintln!("Loading model from {path}");
     let model_entries = load_model(path)?;
     let data_entries = match data_path {
-        Some(data_path) => load_data(data_path)?,
+        Some(data_path) => {
+            eprintln!("Loading data from {path}");
+            load_data(data_path)?
+        }
         None => vec![],
     };
     Ok(model_entries.into_iter().chain(data_entries).collect())
@@ -56,17 +61,26 @@ pub fn merge_model(entries: Vec<Entry>) -> ModelWithData {
 
 /// Convert merged model to matrix.
 pub fn generate_matrix(model: ModelWithData) -> Compiled {
-    gen_matrix(model)
+    eprintln!("Generating matrix");
+    let t0 = Instant::now();
+    let compiled = gen_matrix(model);
+    eprintln!("Matrix generated in {:?}", t0.elapsed());
+    compiled
 }
 
 /// Print matrix in MPS format to stdout.
 pub fn matrix_to_mps(compiled: Compiled, model_name: &str) {
+    eprintln!("Outputting MPS to stdout");
     print_mps(compiled, model_name);
 }
 
 /// Solve the compiled matrix with Highs
 pub fn solve_matrix(compiled: Compiled) {
-    highs_solve(compiled)
+    eprintln!("Solving matrix with HiGHS");
+    let t0 = Instant::now();
+    highs_solve(compiled);
+    eprintln!("Solved in {:?}", t0.elapsed());
+    eprintln!("Results output to stdout");
 }
 
 /// Get the stem from a path.

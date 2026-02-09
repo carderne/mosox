@@ -25,9 +25,6 @@ enum Commands {
     Check {
         path: String,
         data_path: Option<String>,
-        /// Display full Debug output instead of concise Display output
-        #[arg(short, long)]
-        verbose: bool,
     },
     /// Load and output to MPS
     Generate {
@@ -54,18 +51,9 @@ fn run() -> anyhow::Result<()> {
     env_logger::init();
     let cli = Cli::parse();
     match &cli.command {
-        Commands::Check {
-            path,
-            data_path,
-            verbose,
-        } => {
+        Commands::Check { path, data_path } => {
             let entries = load_model_and_data(path, data_path.as_deref())?;
-            let model = merge_model(entries);
-
-            // Print the model
-            if *verbose {
-                println!("{:#?}", model);
-            }
+            merge_model(entries);
             Ok(())
         }
         Commands::Generate { path, data_path } => {
