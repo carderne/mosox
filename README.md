@@ -165,7 +165,7 @@ Not yet implemented:
 ### Sets
 Not yet supported:
 - Elements larger than two-tuple.
-- `within` is supported but not enforced
+- `within` (parsed but not enforced)
 
 ### Parameters
 Not yet supported:
@@ -176,9 +176,8 @@ Not yet supported:
 
 ### Variables
 Not yet supported:
-- Fixed value
-- Type specifier (integer, binary, symbolic) (parsed but not enforced)
-- Relational condition (parsed but not enforced)
+- Bounds specified as expressions (currently only constant accepted)
+- Type specifier (integer, binary) (parsed but not enforced)
 
 ### Constraints
 Not yet supported:

@@ -14,20 +14,20 @@ pub enum Bounds {
 }
 
 impl Bounds {
-    pub fn from_gmpl_bounds(bounds: Option<ir::VarBounds>) -> Self {
-        match bounds {
-            Some(bounds) => match bounds.op {
+    pub fn from_gmpl_bounds(bounds: Vec<ir::VarBounds>) -> Vec<Self> {
+        bounds
+            .into_iter()
+            .map(|bound| match bound.op {
                 ir::RelOp::Lt => panic!("Less than not supported"),
-                ir::RelOp::Le => Self::Upper(bounds.value),
-                ir::RelOp::Eq => Self::Fixed(bounds.value),
-                ir::RelOp::EqEq => Self::Fixed(bounds.value),
+                ir::RelOp::Le => Self::Upper(bound.value),
+                ir::RelOp::Eq => Self::Fixed(bound.value),
+                ir::RelOp::EqEq => Self::Fixed(bound.value),
                 ir::RelOp::Ne => panic!("Not equal not supported"),
                 ir::RelOp::Ne2 => panic!("Not equal not supported"),
-                ir::RelOp::Ge => Self::Lower(bounds.value),
+                ir::RelOp::Ge => Self::Lower(bound.value),
                 ir::RelOp::Gt => panic!("Greater than not supported"),
-            },
-            None => Self::Free,
-        }
+            })
+            .collect()
     }
 
     pub fn to_range(self) -> std::ops::RangeInclusive<f64> {

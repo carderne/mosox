@@ -71,20 +71,30 @@ fn write_var_bounds(w: &mut impl Write, vars: &VarsMap) {
     writeln!(w, "BOUNDS").unwrap();
 
     for ((var_name, var_idx), var) in vars {
-        if let Bounds::Lower(v) = var.bounds
-            && v == 0.0
-        {
-            // exclude vars with >= 0, as that is default in MPS
-            continue;
-        }
-
         let var_name = intern_resolve(*var_name);
-        write!(w, " {} BND1 {var_name}", var.bounds).unwrap();
-        write_index_vals(w, var_idx);
+        if var.bounds.is_empty() {
+            write!(w, " FR BND1 {var_name}").unwrap();
+            write_index_vals(w, var_idx);
+            writeln!(w).unwrap();
+        } else {
+            for bound in &var.bounds {
+                if let Bounds::Lower(v) = bound
+                    && *v == 0.0
+                {
+                    // exclude vars with >= 0, as that is default in MPS
+                    continue;
+                }
 
-        match var.bounds {
-            Bounds::Free => writeln!(w).unwrap(),
-            Bounds::Lower(v) | Bounds::Upper(v) | Bounds::Fixed(v) => writeln!(w, " {v}").unwrap(),
+                write!(w, " {bound} BND1 {var_name}").unwrap();
+                write_index_vals(w, var_idx);
+
+                match bound {
+                    Bounds::Free => writeln!(w).unwrap(),
+                    Bounds::Lower(v) | Bounds::Upper(v) | Bounds::Fixed(v) => {
+                        writeln!(w, " {v}").unwrap()
+                    }
+                }
+            }
         }
     }
 }

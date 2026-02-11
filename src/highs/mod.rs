@@ -1,3 +1,4 @@
+mod bounds;
 mod output;
 
 use std::fmt::Write as _;
@@ -8,6 +9,7 @@ use highs::{ColProblem, Row, Sense};
 use indexmap::IndexMap;
 
 use crate::{
+    highs::bounds::bounds_vec_to_range,
     ir::{ObjSense, interner::intern_resolve, op::RowType},
     matrix::{Compiled, ConId, VarId},
 };
@@ -82,8 +84,14 @@ pub fn highs_solve(compiled: Compiled, format: Format) {
     let objective = objective.expect("no objective function founds");
 
     for (var_id, con_map) in vars {
-        cols.push(var_id);
-        let range = con_map.bounds.to_range();
+        let range = bounds_vec_to_range(con_map.bounds);
+        let range = match range {
+            Err(e) => {
+                let var_name = intern_resolve(var_id.0);
+                panic!("Failed to parse {var_name}: {e}");
+            }
+            Ok(r) => r,
+        };
         let mut row_factors: Vec<(Row, f64)> = vec![];
 
         let mut col_factor: f64 = 0.;
@@ -96,6 +104,7 @@ pub fn highs_solve(compiled: Compiled, format: Format) {
                 row_factors.push((*row, *val));
             }
         }
+        cols.push(var_id);
         pb.add_column(col_factor, range, &row_factors);
     }
 

@@ -34,8 +34,10 @@ model_entry = _{
 
 // Variable
 // Example: var Demand >= 0;
-VAR        = { "var" ~ name ~ (domain | simple_domain)? ~ var_bounds? ~ (","? ~ param_type)? ~ ";" }
+VAR        = { "var" ~ name ~ (domain | simple_domain)? ~ (","? ~ var_attrib)* ~ ";" }
+var_attrib = { var_bounds | var_type }
 var_bounds = { rel_op ~ number }
+var_type      =  { "integer" | "binary" }
 
 // Parameter
 // The comma separator seems to be optional

@@ -42,16 +42,16 @@ static LOGIC_PRATT: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
 pub struct Var {
     pub name: Spur,
     pub domain: Option<Domain>,
-    pub bounds: Option<VarBounds>,
-    pub param_type: Option<ParamType>,
+    pub bounds: Vec<VarBounds>,
+    pub var_type: VarType,
 }
 
 impl Var {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
         let mut name: Option<Spur> = None;
         let mut domain = None;
-        let mut bounds = None;
-        let mut param_type = None;
+        let mut bounds = Vec::new();
+        let mut var_type = VarType::default();
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
@@ -59,8 +59,15 @@ impl Var {
                 Rule::domain => domain = Some(Domain::from_entry(pair)),
                 // simple_domain is parsed but not used - var access uses index values from the set
                 Rule::simple_domain => {}
-                Rule::var_bounds => bounds = Some(VarBounds::from_entry(pair)),
-                Rule::param_type => param_type = Some(ParamType::from_entry(pair)),
+                Rule::var_attrib => {
+                    for inner in pair.into_inner() {
+                        match inner.as_rule() {
+                            Rule::var_bounds => bounds.push(VarBounds::from_entry(inner)),
+                            Rule::var_type => var_type = VarType::from_entry(inner),
+                            _ => {}
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -69,7 +76,7 @@ impl Var {
             name: name.unwrap(),
             domain,
             bounds,
-            param_type,
+            var_type,
         }
     }
 }
@@ -80,11 +87,11 @@ impl fmt::Display for Var {
         if self.domain.is_some() {
             write!(f, " <domain>")?;
         }
-        if let Some(bounds) = &self.bounds {
+        for bounds in &self.bounds {
             write!(f, " {}", bounds)?;
         }
-        if let Some(ptype) = &self.param_type {
-            write!(f, " {}", ptype)?;
+        if !matches!(self.var_type, VarType::Float) {
+            write!(f, " {}", self.var_type)?;
         }
         Ok(())
     }
@@ -102,7 +109,7 @@ pub enum ParamAssign {
 pub struct Param {
     pub name: Spur,
     pub domain: Option<Domain>,
-    pub param_type: Option<ParamType>,
+    pub param_type: ParamType,
     pub conditions: Vec<ParamCondition>,
     pub param_in: Option<Expr>,
     pub default: Option<Expr>,
@@ -113,7 +120,7 @@ impl Param {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
         let mut name: Option<Spur> = None;
         let mut domain = None;
-        let mut param_type = None;
+        let mut param_type = ParamType::default();
         let mut conditions = Vec::new();
         let mut param_in = None;
         let mut default = None;
@@ -125,7 +132,7 @@ impl Param {
                 Rule::domain => domain = Some(Domain::from_entry(pair)),
                 // simple_domain is parsed but not used - param access uses index values from the set
                 Rule::simple_domain => {}
-                Rule::param_type => param_type = Some(ParamType::from_entry(pair)),
+                Rule::param_type => param_type = ParamType::from_entry(pair),
                 Rule::param_condition => conditions.push(ParamCondition::from_entry(pair)),
                 Rule::param_in => param_in = pair.into_inner().next().map(|p| Expr::from_entry(p)),
                 Rule::param_default => {
@@ -168,8 +175,8 @@ impl fmt::Display for Param {
         if self.domain.is_some() {
             write!(f, " <domain>")?;
         }
-        if let Some(ptype) = &self.param_type {
-            write!(f, " {}", ptype)?;
+        if !matches!(self.param_type, ParamType::Float) {
+            write!(f, " {}", self.param_type)?;
         }
         if !self.conditions.is_empty() {
             write!(f, " <conditions>")?;
@@ -654,9 +661,40 @@ impl fmt::Display for ConstraintExpr {
     }
 }
 
+/// Variable type
+#[derive(Clone, Debug, Default)]
+pub enum VarType {
+    #[default]
+    Float,
+    Integer,
+    Binary,
+}
+
+impl VarType {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        match entry.as_str() {
+            "integer" => VarType::Integer,
+            "binary" => VarType::Binary,
+            _ => VarType::Float,
+        }
+    }
+}
+
+impl fmt::Display for VarType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            VarType::Float => write!(f, "float"),
+            VarType::Integer => write!(f, "integer"),
+            VarType::Binary => write!(f, "binary"),
+        }
+    }
+}
+
 /// Parameter type
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum ParamType {
+    #[default]
+    Float,
     Integer,
     Binary,
     Symbolic,
@@ -668,7 +706,7 @@ impl ParamType {
             "integer" => ParamType::Integer,
             "binary" => ParamType::Binary,
             "symbolic" => ParamType::Symbolic,
-            _ => ParamType::Integer,
+            _ => ParamType::Float,
         }
     }
 }
@@ -676,6 +714,7 @@ impl ParamType {
 impl fmt::Display for ParamType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            ParamType::Float => write!(f, "float"),
             ParamType::Integer => write!(f, "integer"),
             ParamType::Binary => write!(f, "binary"),
             ParamType::Symbolic => write!(f, "symbolic"),

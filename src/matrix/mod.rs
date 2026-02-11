@@ -20,7 +20,7 @@ pub type ConId = (Spur, Arc<Index>);
 pub type VarId = (Spur, Arc<Index>);
 
 pub struct VarWithCoefficients {
-    pub bounds: Bounds,
+    pub bounds: Vec<Bounds>,
     /// coeffs is a map of (constraint_name, constraint_index) -> coefficient
     pub coeffs: IndexMap<ConId, f64>,
 }
@@ -69,7 +69,7 @@ fn build_cols_and_rows(
         for pair in pairs {
             cols.entry((pair.var, Arc::new(pair.index)))
                 .or_insert_with(|| VarWithCoefficients {
-                    bounds: *lookups.var_map.get(&pair.var).unwrap(),
+                    bounds: lookups.var_map.get(&pair.var).unwrap().clone(),
                     coeffs: IndexMap::new(),
                 })
                 .coeffs

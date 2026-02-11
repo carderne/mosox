@@ -17,7 +17,7 @@ use crate::{
 
 pub struct Lookups {
     pub set_map: IndexMap<Spur, SetCont>,
-    pub var_map: HashMap<Spur, Bounds>,
+    pub var_map: HashMap<Spur, Vec<Bounds>>,
     pub par_map: HashMap<Spur, Param>,
 }
 
