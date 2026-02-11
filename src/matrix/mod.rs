@@ -12,7 +12,7 @@ use smallvec::SmallVec;
 
 use crate::ir::model::{ConstraintOrObjective, ModelWithData};
 use crate::ir::op::{Bounds, RowType};
-use crate::ir::{Index, ObjSense};
+use crate::ir::{Index, ObjSense, VarType};
 use crate::matrix::constraint::{Pair, algebra, domain_to_indexes, get_index_map, recurse};
 use crate::matrix::lookup::Lookups;
 
@@ -20,6 +20,7 @@ pub type ConId = (Spur, Arc<Index>);
 pub type VarId = (Spur, Arc<Index>);
 
 pub struct VarWithCoefficients {
+    pub var_type: VarType,
     pub bounds: Vec<Bounds>,
     /// coeffs is a map of (constraint_name, constraint_index) -> coefficient
     pub coeffs: IndexMap<ConId, f64>,
@@ -68,9 +69,13 @@ fn build_cols_and_rows(
         rows.push(((name, idx.clone()), row_type, rhs));
         for pair in pairs {
             cols.entry((pair.var, Arc::new(pair.index)))
-                .or_insert_with(|| VarWithCoefficients {
-                    bounds: lookups.var_map.get(&pair.var).unwrap().clone(),
-                    coeffs: IndexMap::new(),
+                .or_insert_with(|| {
+                    let v = lookups.var_map.get(&pair.var).unwrap();
+                    VarWithCoefficients {
+                        var_type: v.var_type,
+                        bounds: v.bounds.clone(),
+                        coeffs: IndexMap::new(),
+                    }
                 })
                 .coeffs
                 .entry((name, idx.clone()))

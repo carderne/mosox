@@ -10,7 +10,7 @@ use indexmap::IndexMap;
 
 use crate::{
     highs::bounds::bounds_vec_to_range,
-    ir::{ObjSense, interner::intern_resolve, op::RowType},
+    ir::{ObjSense, VarType, interner::intern_resolve, op::RowType},
     matrix::{Compiled, ConId, VarId},
 };
 
@@ -105,7 +105,18 @@ pub fn highs_solve(compiled: Compiled, format: Format) {
             }
         }
         cols.push(var_id);
-        pb.add_column(col_factor, range, &row_factors);
+
+        match con_map.var_type {
+            VarType::Float => {
+                pb.add_column(col_factor, range, &row_factors);
+            }
+            VarType::Integer => {
+                pb.add_integer_column(col_factor, range, &row_factors);
+            }
+            VarType::Binary => {
+                pb.add_integer_column(col_factor, 0..=1, &row_factors);
+            }
+        };
     }
 
     let highs_sense = match sense {

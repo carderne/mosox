@@ -662,7 +662,7 @@ impl fmt::Display for ConstraintExpr {
 }
 
 /// Variable type
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum VarType {
     #[default]
     Float,

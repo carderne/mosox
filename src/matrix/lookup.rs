@@ -5,7 +5,7 @@ use lasso::Spur;
 
 use crate::{
     ir::{
-        self,
+        self, VarType,
         model::{ParamWithData, SetWithData},
         op::Bounds,
     },
@@ -15,9 +15,14 @@ use crate::{
     },
 };
 
+pub struct VarCont {
+    pub var_type: VarType,
+    pub bounds: Vec<Bounds>,
+}
+
 pub struct Lookups {
     pub set_map: IndexMap<Spur, SetCont>,
-    pub var_map: HashMap<Spur, Vec<Bounds>>,
+    pub var_map: HashMap<Spur, VarCont>,
     pub par_map: HashMap<Spur, Param>,
 }
 
@@ -34,7 +39,15 @@ impl Lookups {
                 .collect(),
             var_map: vars
                 .into_iter()
-                .map(|var| (var.name, Bounds::from_gmpl_bounds(var.bounds)))
+                .map(|var| {
+                    (
+                        var.name,
+                        VarCont {
+                            var_type: var.var_type,
+                            bounds: Bounds::from_gmpl_bounds(var.bounds),
+                        },
+                    )
+                })
                 .collect(),
             par_map: pars
                 .into_iter()

@@ -177,7 +177,6 @@ Not yet supported:
 ### Variables
 Not yet supported:
 - Bounds specified as expressions (currently only constant accepted)
-- Type specifier (integer, binary) (parsed but not enforced)
 
 ### Constraints
 Not yet supported:

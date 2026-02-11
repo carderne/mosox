@@ -2,6 +2,7 @@ use std::io::{BufWriter, Write};
 
 use crate::{
     ir::{
+        VarType,
         interner::intern_resolve,
         op::{Bounds, RowType},
         write_index_vals,
@@ -18,6 +19,7 @@ pub fn print_mps(compiled: Compiled, model_name: &str) {
     write_var_cols(&mut w, &compiled.vars);
     write_con_rhs(&mut w, &compiled.cons);
     write_var_bounds(&mut w, &compiled.vars);
+    write_int_bin_vars(&mut w, &compiled.vars);
     writeln!(w, "ENDATA").unwrap();
     // BufWriter flushes on drop
 }
@@ -95,6 +97,34 @@ fn write_var_bounds(w: &mut impl Write, vars: &VarsMap) {
                     }
                 }
             }
+        }
+    }
+}
+
+fn write_int_bin_vars(w: &mut impl Write, vars: &VarsMap) {
+    let int_vars = vars
+        .iter()
+        .filter(|(_, var)| var.var_type == VarType::Integer);
+    if int_vars.clone().count() > 0 {
+        writeln!(w, "INTEGER").unwrap();
+        for ((var_name, var_idx), _) in int_vars {
+            let var_name = intern_resolve(*var_name);
+            write!(w, " {var_name}").unwrap();
+            write_index_vals(w, var_idx);
+            writeln!(w).unwrap();
+        }
+    }
+
+    let bin_vars = vars
+        .iter()
+        .filter(|(_, var)| var.var_type == VarType::Binary);
+    if bin_vars.clone().count() > 0 {
+        writeln!(w, "BINARY").unwrap();
+        for ((var_name, var_idx), _) in bin_vars {
+            let var_name = intern_resolve(*var_name);
+            write!(w, " {var_name}").unwrap();
+            write_index_vals(w, var_idx);
+            writeln!(w).unwrap();
         }
     }
 }
