@@ -22,12 +22,12 @@ model_entry = _{
   | SET
   | OBJECTIVE
   | CONSTRAINT
+  | CHECK
   // Below here are ignored
   | FOR
   | TABLE
   | PRINT
   | DISPLAY
-  | CHECK
   | SOLVE
   | END
 }
@@ -90,7 +90,7 @@ PRINT   = @{ "printf" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
 DISPLAY = @{ "display" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
 
 // Check (ignored)
-CHECK = @{ "check" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
+CHECK =  { "check" ~ domain? ~ ":"? ~ logic_expr  ~ ";" }
 
 // Solve (ignored)
 SOLVE = { "solve" ~ ";" }

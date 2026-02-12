@@ -103,15 +103,15 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
         }
         Expr::Conditional(conditional) => {
             let default;
-            let expr: &Expr =
-                if check_domain_condition(&conditional.condition, lookups, idx_val_map) {
-                    &conditional.then_expr
-                } else if let Some(otherwise) = &conditional.else_expr {
-                    otherwise
-                } else {
-                    default = Box::new(Expr::Number(0.0));
-                    &default
-                };
+            let expr: &Expr = if check_logic_condition(&conditional.condition, lookups, idx_val_map)
+            {
+                &conditional.then_expr
+            } else if let Some(otherwise) = &conditional.else_expr {
+                otherwise
+            } else {
+                default = Box::new(Expr::Number(0.0));
+                &default
+            };
 
             recurse(expr, lookups, idx_val_map)
         }
@@ -271,7 +271,7 @@ pub fn domain_to_indexes(
                 Some(logic) => {
                     let mut idx_map = get_index_map(parts, &idx);
                     idx_extend(&mut idx_map, idx_val_map);
-                    if check_domain_condition(logic, lookups, &idx_map) {
+                    if check_logic_condition(logic, lookups, &idx_map) {
                         Some(idx)
                     } else {
                         None
@@ -282,7 +282,11 @@ pub fn domain_to_indexes(
         .collect::<Vec<Index>>()
 }
 
-fn check_domain_condition(logic: &LogicExpr, lookups: &Lookups, idx_val_map: &IdxValMap) -> bool {
+pub fn check_logic_condition(
+    logic: &LogicExpr,
+    lookups: &Lookups,
+    idx_val_map: &IdxValMap,
+) -> bool {
     match logic {
         LogicExpr::Comparison { lhs, op, rhs } => {
             let lhs = recurse(lhs, lookups, idx_val_map);
@@ -312,8 +316,8 @@ fn check_domain_condition(logic: &LogicExpr, lookups: &Lookups, idx_val_map: &Id
             }
         }
         LogicExpr::BoolOp { lhs, op, rhs } => {
-            let lhs = check_domain_condition(lhs, lookups, idx_val_map);
-            let rhs = check_domain_condition(rhs, lookups, idx_val_map);
+            let lhs = check_logic_condition(lhs, lookups, idx_val_map);
+            let rhs = check_logic_condition(rhs, lookups, idx_val_map);
             match op {
                 BoolOp::And => lhs && rhs,
                 BoolOp::Or => lhs || rhs,

@@ -21,6 +21,8 @@ maximize profit: profit1 * x1 + profit2 * x2;
 s.t. labor: labor1 * x1 + labor2 * x2 <= labor_limit;
 s.t. material: material1 * x1 + material2 * x2 <= material_limit;
 
+check profit1 = 40;
+
 solve;
 
 data;

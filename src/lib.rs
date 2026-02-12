@@ -61,12 +61,12 @@ pub fn merge_model(entries: Vec<Entry>) -> ModelWithData {
 }
 
 /// Convert merged model to matrix.
-pub fn generate_matrix(model: ModelWithData) -> Compiled {
+pub fn generate_matrix(model: ModelWithData) -> Result<Compiled> {
     eprintln!("Generating matrix");
     let t0 = Instant::now();
-    let compiled = gen_matrix(model);
+    let compiled = gen_matrix(model)?;
     eprintln!("Matrix generated in {:?}", t0.elapsed());
-    compiled
+    Ok(compiled)
 }
 
 /// Print matrix in MPS format to stdout.

@@ -36,11 +36,11 @@ pub fn consume(entries: Pairs<'_, Rule>) -> Vec<Entry> {
             Rule::CONSTRAINT => Some(Entry::Constraint(ir::Constraint::from_entry(entry))),
             Rule::SET_DATA => Some(Entry::DataSet(ir::SetData::from_entry(entry))),
             Rule::PARAM_DATA => Some(Entry::DataParam(ir::ParamData::from_entry(entry))),
+            Rule::CHECK => Some(Entry::Check(ir::Check::from_entry(entry))),
             Rule::END
             | Rule::EOI
             | Rule::PRINT
             | Rule::DISPLAY
-            | Rule::CHECK
             | Rule::SOLVE
             | Rule::FOR
             | Rule::TABLE

@@ -5,8 +5,9 @@ use lasso::Spur;
 use smallvec::smallvec;
 
 use crate::ir::{
-    Constraint, ConstraintExpr, Domain, Entry, Expr, ObjSense, Objective, Param, ParamAssign,
-    ParamData, Set, SetData, SetVal, SetValTerminal, SetVals, Var, intern_resolve, op::RowType,
+    Check, Constraint, ConstraintExpr, Domain, Entry, Expr, ObjSense, Objective, Param,
+    ParamAssign, ParamData, Set, SetData, SetVal, SetValTerminal, SetVals, Var, intern_resolve,
+    op::RowType,
 };
 
 /// A set declaration with optional data
@@ -71,6 +72,7 @@ pub struct ModelWithData {
     pub sets: Vec<SetWithData>,
     pub vars: Vec<Var>,
     pub pars: Vec<ParamWithData>,
+    pub checks: Vec<Check>,
     pub constraints: Vec<ConstraintOrObjective>,
 }
 
@@ -88,6 +90,10 @@ impl fmt::Display for ModelWithData {
             writeln!(f, "{}", var)?;
         }
 
+        for check in &self.checks {
+            writeln!(f, "{}", check)?;
+        }
+
         for constraint in &self.constraints {
             writeln!(f, "{}", constraint)?;
         }
@@ -103,6 +109,7 @@ impl ModelWithData {
         let mut sets = Vec::new();
         let mut params = Vec::new();
         let mut vars = Vec::new();
+        let mut checks = Vec::new();
         let mut constraints = Vec::new();
         let mut data_sets = Vec::new();
         let mut data_params = Vec::new();
@@ -119,6 +126,7 @@ impl ModelWithData {
                 Entry::Set(set) => sets.push(set),
                 Entry::Param(param) => params.push(param),
                 Entry::Var(var) => vars.push(var),
+                Entry::Check(check) => checks.push(check),
                 Entry::Constraint(constraint) => constraints.push(constraint),
                 Entry::DataSet(data_set) => data_sets.push(data_set),
                 Entry::DataParam(data_param) => data_params.push(data_param),
@@ -220,6 +228,7 @@ impl ModelWithData {
             sets: matched_sets,
             pars: matched_params,
             vars,
+            checks,
             constraints: all_constraints,
         }
     }

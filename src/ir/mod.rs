@@ -501,6 +501,46 @@ impl fmt::Display for Constraint {
     }
 }
 
+/// Check statement
+#[derive(Clone, Debug)]
+pub struct Check {
+    pub line_no: i32,
+    pub domain: Option<Domain>,
+    pub expr: LogicExpr,
+}
+
+impl Check {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let (line_no, _) = entry.line_col();
+        let mut domain = None;
+        let mut expr = None;
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::domain => domain = Some(Domain::from_entry(pair)),
+                Rule::logic_expr => expr = Some(LogicExpr::from_entry(pair)),
+                _ => {}
+            }
+        }
+
+        Self {
+            line_no: line_no as i32,
+            domain,
+            expr: expr.unwrap(),
+        }
+    }
+}
+
+impl fmt::Display for Check {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "check")?;
+        if self.domain.is_some() {
+            write!(f, " <domain>")?;
+        }
+        write!(f, " {}", self.expr)
+    }
+}
+
 /// Data set values
 #[derive(Clone, Debug)]
 pub struct SetData {
@@ -947,6 +987,7 @@ pub enum Entry {
     Set(Set),
     Objective(Objective),
     Constraint(Constraint),
+    Check(Check),
     DataSet(SetData),
     DataParam(ParamData),
 }
@@ -959,6 +1000,7 @@ impl fmt::Display for Entry {
             Entry::Set(s) => write!(f, "{}", s),
             Entry::Objective(o) => write!(f, "{}", o),
             Entry::Constraint(c) => write!(f, "{}", c),
+            Entry::Check(c) => write!(f, "{}", c),
             Entry::DataSet(ds) => write!(f, "{}", ds),
             Entry::DataParam(dp) => write!(f, "{}", dp),
         }

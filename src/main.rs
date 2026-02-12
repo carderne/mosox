@@ -63,7 +63,7 @@ fn run() -> anyhow::Result<()> {
         Commands::Generate { path, data_path } => {
             let entries = load_model_and_data(path, data_path.as_deref())?;
             let model = merge_model(entries);
-            let compiled = generate_matrix(model);
+            let compiled = generate_matrix(model)?;
             matrix_to_mps(compiled, stem(path));
             Ok(())
         }
@@ -74,7 +74,7 @@ fn run() -> anyhow::Result<()> {
         } => {
             let entries = load_model_and_data(path, data_path.as_deref())?;
             let model = merge_model(entries);
-            let compiled = generate_matrix(model);
+            let compiled = generate_matrix(model)?;
             solve_matrix(compiled, format.clone());
             Ok(())
         }

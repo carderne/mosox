@@ -1,3 +1,4 @@
+mod check;
 mod constraint;
 mod lookup;
 mod param;
@@ -5,6 +6,7 @@ mod set;
 
 use std::sync::Arc;
 
+use anyhow::Result;
 use indexmap::IndexMap;
 use lasso::Spur;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -13,6 +15,7 @@ use smallvec::SmallVec;
 use crate::ir::model::{ConstraintOrObjective, ModelWithData};
 use crate::ir::op::{Bounds, RowType};
 use crate::ir::{Index, ObjSense, VarType};
+use crate::matrix::check::check_checks;
 use crate::matrix::constraint::{Pair, algebra, domain_to_indexes, get_index_map, recurse};
 use crate::matrix::lookup::Lookups;
 
@@ -38,15 +41,17 @@ pub struct Compiled {
     pub cons: ConsMap, // rows
 }
 
-pub fn gen_matrix(model: ModelWithData) -> Compiled {
+pub fn gen_matrix(model: ModelWithData) -> Result<Compiled> {
     let ModelWithData {
         sense,
         sets,
         pars,
         vars,
+        checks,
         constraints,
     } = model;
     let lookups = Lookups::from_model(sets, vars, pars);
+    check_checks(checks, &lookups)?;
     let cons = build_constraints(constraints, &lookups);
     build_cols_and_rows(sense, cons, &lookups)
 }
@@ -55,7 +60,7 @@ fn build_cols_and_rows(
     sense: ObjSense,
     cons: Vec<SolvedConstraint>,
     lookups: &Lookups,
-) -> Compiled {
+) -> Result<Compiled> {
     let mut rows: ConsMap = vec![];
     let mut cols: VarsMap = IndexMap::new();
     for SolvedConstraint {
@@ -86,11 +91,11 @@ fn build_cols_and_rows(
         }
     }
 
-    Compiled {
+    Ok(Compiled {
         sense,
         vars: cols,
         cons: rows,
-    }
+    })
 }
 
 struct SolvedConstraint {

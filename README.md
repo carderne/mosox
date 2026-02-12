@@ -142,8 +142,6 @@ Note that some of the performance advantage over glpsol may be caused by the lim
 | osemosys_large    | 4   | 130.3s | 20.0s   | 6.5x    |
 
 ## Known limitations
-Hopefully this list is shorter then the "supported feature" list!
-
 This list of limitations is made with reference to the GNU MathProg Language Reference which can be viewed [here](./docs/gmpl.pdf) or downloaded from the original [here](https://www.gnu.org/software/glpk).
 
 It is intended that all of these will ultimately be supported, and most of them are "trivial" to add.
@@ -188,8 +186,8 @@ Not yet supported:
 - Alias
 
 ### Other statements
-These are parsed but are otherwise ignored:
-- Check statement
+Support for these statements is not planned.
+Results should instead be parsed from the solver output.
 - Display statement
 - Printf statement
 - For statement
