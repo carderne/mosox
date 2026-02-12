@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mosox — LP matrix generator for GMPL</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: #111; background: #fff; line-height: 1.6; padding: 2rem 1rem; }
+    .container { max-width: 700px; margin: 0 auto; }
+    h1 { font-size: 2.5rem; margin-bottom: 0.25rem; }
+    .tagline { font-size: 1.1rem; color: #444; margin-bottom: 0.5rem; }
+    .repo { margin-bottom: 2.5rem; }
+    .repo a { color: #111; }
+    h2 { font-size: 1.3rem; margin-bottom: 1rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+    code { font-family: "SF Mono", "Menlo", "Consolas", monospace; font-size: 0.9em; background: #f4f4f4; padding: 0.15em 0.4em; }
+    pre { background: #f4f4f4; padding: 1rem; overflow-x: auto; margin-bottom: 1rem; font-family: "SF Mono", "Menlo", "Consolas", monospace; font-size: 0.9em; line-height: 1.5; }
+    .usage p { margin-bottom: 0.5rem; }
+    .downloads { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2.5rem; }
+    .downloads a { display: inline-block; padding: 0.6rem 1.4rem; border: 2px solid #111; color: #111; text-decoration: none; font-weight: 600; font-size: 0.95rem; }
+    .downloads a:hover { background: #111; color: #fff; }
+    section { margin-bottom: 2.5rem; }
+
+    /* Tabs */
+    .tabs { margin-bottom: 1rem; }
+    .tab-buttons { display: flex; gap: 0; border-bottom: 1px solid #ddd; margin-bottom: 1rem; }
+    .tab-buttons button { background: none; border: none; border-bottom: 2px solid transparent; padding: 0.5rem 1rem; font-size: 0.9rem; font-family: inherit; color: #555; cursor: pointer; margin-bottom: -1px; }
+    .tab-buttons button:hover { color: #111; }
+    .tab-buttons button.active { color: #111; font-weight: 600; border-bottom-color: #111; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .tab-content ol { margin: 0 0 1rem 1.5rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>mosox</h1>
+    <p class="tagline">An LP matrix generator for GMPL. Compiles GMPL models to MPS format and solves them with HiGHS.</p>
+    <p class="repo"><a href="https://github.com/carderne/mosox">github.com/carderne/mosox</a></p>
+
+    <section>
+      <h2>Download v__VERSION__</h2>
+      <div class="downloads">
+        <a href="__WINDOWS_URL__">Windows</a>
+        <a href="__MACOS_URL__">macOS (Apple Silicon)</a>
+        <a href="__LINUX_URL__">Linux</a>
+      </div>
+
+      <h2>Install</h2>
+      <div class="tabs" id="install-tabs">
+        <div class="tab-buttons">
+          <button class="active" data-tab="windows">Windows</button>
+          <button data-tab="homebrew">Homebrew</button>
+          <button data-tab="macos">macOS</button>
+          <button data-tab="linux">Linux</button>
+          <button data-tab="cargo">Cargo</button>
+        </div>
+        <div class="tab-content active" data-tab="windows">
+          <ol>
+            <li>Download the latest version using the link above</li>
+            <li>Unzip it to a useful location</li>
+            <li>Run commands below from the same location as the extracted mosox.exe</li>
+          </ol>
+        </div>
+        <div class="tab-content" data-tab="homebrew">
+<pre>brew tap carderne/mosox-tap
+brew install mosox</pre>
+        </div>
+        <div class="tab-content" data-tab="macos">
+          <ol>
+            <li>Download the latest version using the link above</li>
+            <li>Extract it and move it to a useful location using the instructions below</li>
+          </ol>
+<pre>tar xzf mosox-__VERSION__-aarch64-apple-darwin.tar.gz
+sudo mv mosox /usr/local/bin/</pre>
+        </div>
+        <div class="tab-content" data-tab="linux">
+          <ol>
+            <li>Download the latest version using the link above</li>
+            <li>Extract it and move it to a useful location using the instructions below</li>
+          </ol>
+<pre>tar xzf mosox-__VERSION__-x86_64-unknown-linux-gnu.tar.gz
+mv mosox ~/.local/bin/</pre>
+        </div>
+        <div class="tab-content" data-tab="cargo">
+<pre>cargo install mosox</pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="usage">
+      <h2>Usage</h2>
+
+      <p>Compile a model to MPS:</p>
+<pre>mosox compile model.mod &gt; output.mps</pre>
+
+      <p>Compile with a data file:</p>
+<pre>mosox compile model.mod data.dat &gt; output.mps</pre>
+
+      <p>Solve a model:</p>
+<pre>mosox solve model.mod</pre>
+
+      <p>Solve with CSV output:</p>
+<pre>mosox solve model.mod --format csv &gt; results.csv</pre>
+
+      <p>Solve with text output:</p>
+<pre>mosox solve model.mod &gt; results.txt</pre>
+    </section>
+  </div>
+
+  <script>
+    document.querySelectorAll('.tabs').forEach(function(tabs) {
+      tabs.querySelectorAll('.tab-buttons button').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var group = btn.closest('.tabs');
+          var tab = btn.getAttribute('data-tab');
+          group.querySelectorAll('.tab-buttons button').forEach(function(b) { b.classList.remove('active'); });
+          group.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+          btn.classList.add('active');
+          group.querySelector('.tab-content[data-tab="' + tab + '"]').classList.add('active');
+        });
+      });
+    });
+  </script>
+</body>
+</html>

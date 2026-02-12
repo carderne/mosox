@@ -4,8 +4,9 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,6 +14,8 @@ env:
 jobs:
   create-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -30,6 +33,8 @@ jobs:
 
   build:
     needs: create-release
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -113,3 +118,30 @@ jobs:
       - run: cargo publish --allow-dirty
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  pages:
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Interpolate version into HTML
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          sed -i "s|__VERSION__|$VERSION|g" site/index.html
+          sed -i "s|__MACOS_URL__|https://github.com/carderne/mosox/releases/download/v$VERSION/mosox-$VERSION-aarch64-apple-darwin.tar.gz|g" site/index.html
+          sed -i "s|__WINDOWS_URL__|https://github.com/carderne/mosox/releases/download/v$VERSION/mosox-$VERSION-x86_64-pc-windows-msvc.zip|g" site/index.html
+          sed -i "s|__LINUX_URL__|https://github.com/carderne/mosox/releases/download/v$VERSION/mosox-$VERSION-x86_64-unknown-linux-gnu.tar.gz|g" site/index.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
