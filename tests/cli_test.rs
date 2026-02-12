@@ -4,7 +4,8 @@ use std::process::Command;
 #[test]
 fn run_load() {
     let mut cmd = Command::cargo_bin("mosox").unwrap();
-    cmd.arg("check").arg("examples/osemosys_small/osemosys.mod");
+    cmd.arg("compile")
+        .arg("examples/osemosys_small/osemosys.mod");
     cmd.assert().success();
 }
 

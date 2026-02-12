@@ -3,7 +3,7 @@
 An LP matrix generator for GMPL (GNU MathProg).
 
 Can be used in two ways:
-- Generate an MPS file for solving elsewhere
+- Compile an MPS file for solving elsewhere
 - Solve directly with the [HiGHS](https://highs.dev/) integration, no other binary needed
 
 **Currently a work-in-progress.**
@@ -42,28 +42,27 @@ MathProg Translation Kit
 Usage: mosox <COMMAND>
 
 Commands:
-  check     Check for errors and quit
-  generate  Load and output to MPS
+  compile    Load and output to MPS
   solve      Solve with HiGHS
   normalize  Normalize an MPS file for diffing
   compare    Compare two normalized MPS files with epsilon tolerance
-  help      Print this message or the help of the given subcommand(s)
+  help       Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help
   -V, --version  Print version
 ```
 
-### Generate MPS
-Generate MPS for one of the examples in this repo.
+### Compile MPS
+Compile MPS for one of the examples in this repo.
 Output will be written to stdout.
 ```bash
-mosox generate examples/basic/model.mod
+mosox compile examples/basic/model.mod
 ```
 
 Or an example with a separate data file, piping MPS to a file:
 ```bash
-mosox generate examples/sets/model.mod examples/sets/data.dat > output.mps
+mosox compile examples/sets/model.mod examples/sets/data.dat > output.mps
 ```
 
 ### Solve a model

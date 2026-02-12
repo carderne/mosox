@@ -65,7 +65,7 @@ pub fn generate_matrix(model: ModelWithData) -> Result<Compiled> {
     eprintln!("Generating matrix");
     let t0 = Instant::now();
     let compiled = gen_matrix(model)?;
-    eprintln!("Matrix generated in {:?}", t0.elapsed());
+    eprintln!("Matrix compiled in {:?}", t0.elapsed());
     Ok(compiled)
 }
 

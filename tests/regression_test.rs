@@ -42,9 +42,9 @@ fn regression_examples() {
         });
         let dat_file = find_file_by_ext(&subdir, "dat");
 
-        // Run mosox generate
+        // Run mosox compile
         let mut cmd = Command::cargo_bin("mosox").unwrap();
-        cmd.arg("generate").arg(&mod_file);
+        cmd.arg("compile").arg(&mod_file);
         if let Some(ref dat) = dat_file {
             cmd.arg(dat);
         }
@@ -52,14 +52,14 @@ fn regression_examples() {
 
         if !output.status.success() {
             failures.push(format!(
-                "{}: mosox generate failed:\n{}",
+                "{}: mosox compile failed:\n{}",
                 dir_name,
                 String::from_utf8_lossy(&output.stderr)
             ));
             continue;
         }
 
-        // Normalize the generated output
+        // Normalize the compiled output
         let temp_dir = std::env::temp_dir().join("mosox_regression_test");
         fs::create_dir_all(&temp_dir).unwrap();
         let normalized_output = temp_dir.join(format!("{}_normalized.mps", dir_name));

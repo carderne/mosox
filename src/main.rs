@@ -23,13 +23,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Check for errors and quit
-    Check {
-        path: String,
-        data_path: Option<String>,
-    },
     /// Load and output to MPS
-    Generate {
+    Compile {
         path: String,
         data_path: Option<String>,
     },
@@ -55,12 +50,7 @@ fn run() -> anyhow::Result<()> {
     env_logger::init();
     let cli = Cli::parse();
     match &cli.command {
-        Commands::Check { path, data_path } => {
-            let entries = load_model_and_data(path, data_path.as_deref())?;
-            merge_model(entries);
-            Ok(())
-        }
-        Commands::Generate { path, data_path } => {
+        Commands::Compile { path, data_path } => {
             let entries = load_model_and_data(path, data_path.as_deref())?;
             let model = merge_model(entries);
             let compiled = generate_matrix(model)?;

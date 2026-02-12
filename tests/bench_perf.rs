@@ -69,7 +69,7 @@ fn fmt_duration(d: Duration) -> String {
 fn run_mosox(case: &BenchCase) -> Duration {
     let start = Instant::now();
     let mut cmd = Command::cargo_bin("mosox").unwrap();
-    cmd.arg("generate").arg(case.mod_file);
+    cmd.arg("compile").arg(case.mod_file);
     if let Some(dat) = case.dat_file {
         cmd.arg(dat);
     }
@@ -123,7 +123,7 @@ fn compute_stats(durations: &mut Vec<Duration>) -> Stats {
 
 #[test]
 #[ignore]
-fn bench_generate() {
+fn bench_compile() {
     let run_large = std::env::var("MOSOX_TEST_LARGE").is_ok();
     let bench_glpsol = std::env::var("MOSOX_BENCH_GLPSOL").is_ok();
 
