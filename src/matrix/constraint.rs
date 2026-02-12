@@ -1,10 +1,11 @@
-use crate::ir::LogicExpr;
 use crate::ir::{
     BoolOp, Domain, DomainPart, DomainPartVar, Expr, Index, MathOp, RelOp, SetVal, SetValTerminal,
     Subscript, SubscriptShift, interner::intern_resolve,
 };
+use crate::ir::{LogicExpr, MemberOp, SubsetOp};
 use crate::matrix::lookup::Lookups;
 use crate::matrix::param::ParamVal;
+use crate::matrix::set::resolve_set_expr;
 use itertools::Itertools;
 use lasso::Spur;
 use smallvec::SmallVec;
@@ -313,6 +314,21 @@ pub fn check_logic_condition(
                     _ => panic!("unhandled logic expr: {}", logic),
                 },
                 _ => panic!("vars or mixed terms in domain condition"),
+            }
+        }
+        LogicExpr::Membership { lhs, op, rhs } => {
+            let rhs = resolve_set_expr(rhs, idx_val_map, lookups);
+            match op {
+                MemberOp::In => lhs.iter().all(|elem| rhs.contains(elem)),
+                MemberOp::NotIn => lhs.iter().all(|elem| !rhs.contains(elem)),
+            }
+        }
+        LogicExpr::Subset { lhs, op, rhs } => {
+            let lhs = resolve_set_expr(lhs, idx_val_map, lookups);
+            let rhs = resolve_set_expr(rhs, idx_val_map, lookups);
+            match op {
+                SubsetOp::Within => lhs.iter().all(|elem| rhs.contains(elem)),
+                SubsetOp::NotWithin => lhs.iter().all(|elem| !rhs.contains(elem)),
             }
         }
         LogicExpr::BoolOp { lhs, op, rhs } => {

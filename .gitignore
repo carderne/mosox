@@ -1,7 +1,7 @@
 .claude
 /target
-/scratch/**
 /examples/osemosys_large/**
+/examples/clews/**
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

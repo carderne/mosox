@@ -178,7 +178,7 @@ impl ModelWithData {
                 }
             }
 
-            matched_sets.push(SetWithData { decl: set, data });
+            matched_sets.push(SetWithData { decl: *set, data });
         }
 
         // Check for orphaned data sets

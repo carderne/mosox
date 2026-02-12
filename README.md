@@ -156,7 +156,6 @@ Not yet implemented:
 - These set expressions: "arithmetic" set, conditional set expressions, parenthesized set expressions
 - These set operators: `union`, `diff`, `symdiff`.
 - These logical expressions: iterated expressions (`forall`, `exists`)
-- These logical relational expressions: `in`, `not in`, `within`, `not within`
 - These logical operators: `not`
 
 ### Sets

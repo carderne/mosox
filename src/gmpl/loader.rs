@@ -31,7 +31,7 @@ pub fn consume(entries: Pairs<'_, Rule>) -> Vec<Entry> {
         .filter_map(|entry| match entry.as_rule() {
             Rule::VAR => Some(Entry::Var(ir::Var::from_entry(entry))),
             Rule::PARAM => Some(Entry::Param(ir::Param::from_entry(entry))),
-            Rule::SET => Some(Entry::Set(ir::Set::from_entry(entry))),
+            Rule::SET => Some(Entry::Set(Box::new(ir::Set::from_entry(entry)))),
             Rule::OBJECTIVE => Some(Entry::Objective(ir::Objective::from_entry(entry))),
             Rule::CONSTRAINT => Some(Entry::Constraint(ir::Constraint::from_entry(entry))),
             Rule::SET_DATA => Some(Entry::DataSet(ir::SetData::from_entry(entry))),

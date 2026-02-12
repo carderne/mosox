@@ -1,13 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ir::model::SetWithData,
     ir::{
-        self, DomainPartVar, Index, SetData, SetExpr, SetOf, SetVal, SetValTerminal, SetVals,
-        SetValue,
+        self, DomainPartVar, Index, SetData, SetExpr, SetOf, SetRef, SetVal, SetValTerminal,
+        SetVals, SetValue, model::SetWithData,
     },
     matrix::{
-        constraint::{IdxValMap, domain_to_indexes, idx_get},
+        constraint::{IdxValMap, domain_to_indexes, get_index_map, idx_get},
         lookup::Lookups,
     },
 };
@@ -47,18 +46,22 @@ impl SetCont {
         // I tried add a cache check here with a RwLock<HashMap<...>> but
         // there wasn't any speed up. Possibly because of cloning and expensive hashkeys
 
-        let (dims, expr) = (&self.decl.dims, &self.decl.expr);
+        let (domain, expr) = (&self.decl.domain, &self.decl.expr);
 
         // Try to resolve from expression
         if let Some(expr) = expr {
-            return self.resolve_set_expr(expr, dims, index, lookups);
+            let idx_val_map = get_index_map(&domain.parts, index);
+            return resolve_set_expr(expr, &idx_val_map, lookups);
         }
 
         // Finally use default if available
         if let Some(default) = &self.decl.default {
             return match default {
                 SetValue::Vals(vals) => vals.clone(),
-                SetValue::Expr(expr) => self.resolve_set_expr(expr, dims, index, lookups),
+                SetValue::Expr(expr) => {
+                    let idx_val_map = get_index_map(&domain.parts, index);
+                    resolve_set_expr(expr, &idx_val_map, lookups)
+                }
             };
         }
 
@@ -66,95 +69,53 @@ impl SetCont {
         // TODO: Apply set dimension (dimen) validation at model generation time
         vec![].into()
     }
+}
 
-    fn resolve_set_expr(
-        &self,
-        expr: &SetExpr,
-        dims: &[ir::SetDomainPart],
-        index: &Index,
-        lookups: &Lookups,
-    ) -> SetVals {
-        match expr {
-            // This is using a Set domain expression to actually build the values for the set,
-            // rather than "get" them from one or more sets
-            SetExpr::Domain(domain) => {
-                let idx_val_map: IdxValMap = dims
-                    .iter()
-                    .zip(index.iter().cloned())
-                    .map(|(part, idx_val)| {
-                        (
-                            part.id
-                                .expect("need id in set domain when using set domain expr"),
-                            idx_val,
-                        )
-                    })
-                    .collect();
-                domain_to_indexes(domain, lookups, &idx_val_map)
-                    .iter()
-                    // TODO we're handling only the special case of a single dimension
-                    // to handle more we must check if len > 1 and then build a SetVal::Tuple
-                    .map(|i| *i.first().unwrap())
-                    .collect::<Vec<_>>()
-                    .into()
-            }
-            SetExpr::SetMath(set_math) => {
-                let idx_val_map: IdxValMap = dims
-                    .iter()
-                    .zip(index.iter().cloned())
-                    .map(|(part, idx_val)| {
-                        (
-                            part.id.expect("need id in set domain when using set expr"),
-                            idx_val,
-                        )
-                    })
-                    .collect();
+pub fn resolve_set_expr(expr: &SetExpr, idx_val_map: &IdxValMap, lookups: &Lookups) -> SetVals {
+    match expr {
+        // This is using a Set domain expression to actually build the values for the set,
+        // rather than "get" them from one or more sets
+        SetExpr::Domain(domain) => {
+            domain_to_indexes(domain, lookups, idx_val_map)
+                .iter()
+                // TODO we're handling only the special case of a single dimension
+                // to handle more we must check if len > 1 and then build a SetVal::Tuple
+                .map(|i| *i.first().unwrap())
+                .collect::<Vec<_>>()
+                .into()
+        }
+        SetExpr::SetMath(set_math) => {
+            let sets: Vec<Vec<SetVal>> = set_math
+                .intersection
+                .iter()
+                .map(|v| {
+                    let index_concrete: Index = v
+                        .subscript
+                        .iter()
+                        .map(|i| *idx_get(idx_val_map, i.var).unwrap())
+                        .collect::<Vec<_>>()
+                        .into();
+                    lookups
+                        .set_map
+                        .get(&v.var)
+                        .unwrap()
+                        .resolve(&index_concrete, lookups)
+                        .0
+                })
+                .collect();
 
-                let sets: Vec<Vec<SetVal>> = set_math
-                    .intersection
-                    .iter()
-                    .map(|v| {
-                        let index_concrete: Index = v
-                            .subscript
-                            .iter()
-                            .map(|i| *idx_get(&idx_val_map, i.var).unwrap())
-                            .collect::<Vec<_>>()
-                            .into();
-                        lookups
-                            .set_map
-                            .get(&v.var)
-                            .unwrap()
-                            .resolve(&index_concrete, lookups)
-                            .0
-                    })
-                    .collect();
-
-                intersect(sets).into()
-            }
-            SetExpr::SetOf(set_of) => resolve_set_of(set_of, dims, index, lookups),
+            intersect(sets).into()
+        }
+        SetExpr::SetOf(set_of) => resolve_set_of(set_of, idx_val_map, lookups),
+        SetExpr::Ref(SetRef { spur, index }) => {
+            lookups.set_map.get(spur).unwrap().resolve(index, lookups)
         }
     }
 }
 
-fn resolve_set_of(
-    set_of: &SetOf,
-    dims: &[ir::SetDomainPart],
-    index: &Index,
-    lookups: &Lookups,
-) -> SetVals {
-    let idx_val_map: IdxValMap = dims
-        .iter()
-        .zip(index.iter().cloned())
-        .map(|(part, idx_val)| {
-            (
-                part.id
-                    .expect("need id in set domain when using setof expr"),
-                idx_val,
-            )
-        })
-        .collect();
-
+fn resolve_set_of(set_of: &SetOf, idx_val_map: &IdxValMap, lookups: &Lookups) -> SetVals {
     // Get all index combinations from the domain
-    let domain_indexes = domain_to_indexes(&set_of.domain, lookups, &idx_val_map);
+    let domain_indexes = domain_to_indexes(&set_of.domain, lookups, idx_val_map);
 
     // Extract the integrand values for each domain element
     let mut result = Vec::new();
@@ -166,6 +127,7 @@ fn resolve_set_of(
             .iter()
             .zip(idx.iter())
             .flat_map(|(part, val)| match &part.var {
+                DomainPartVar::None => panic!("Need domain part var in setof expression"),
                 DomainPartVar::Single(id) => vec![(*id, *val)],
                 DomainPartVar::Tuple(ids) => {
                     // For tuple bindings, the val should be a Tuple
@@ -200,6 +162,7 @@ fn resolve_set_of(
 
         // Extract integrand value(s)
         match &set_of.integrand {
+            DomainPartVar::None => panic!("Need domain part var in setof expression"),
             DomainPartVar::Single(id) => {
                 if let Some(val) = idx_get(&iter_map, *id) {
                     result.push(*val);

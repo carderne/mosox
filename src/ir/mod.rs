@@ -57,8 +57,6 @@ impl Var {
             match pair.as_rule() {
                 Rule::name => name = Some(intern(pair.as_str())),
                 Rule::domain => domain = Some(Domain::from_entry(pair)),
-                // simple_domain is parsed but not used - var access uses index values from the set
-                Rule::simple_domain => {}
                 Rule::var_attrib => {
                     for inner in pair.into_inner() {
                         match inner.as_rule() {
@@ -130,8 +128,6 @@ impl Param {
             match pair.as_rule() {
                 Rule::name => name = Some(intern(pair.as_str())),
                 Rule::domain => domain = Some(Domain::from_entry(pair)),
-                // simple_domain is parsed but not used - param access uses index values from the set
-                Rule::simple_domain => {}
                 Rule::param_type => param_type = ParamType::from_entry(pair),
                 Rule::param_condition => conditions.push(ParamCondition::from_entry(pair)),
                 Rule::param_in => param_in = pair.into_inner().next().map(|p| Expr::from_entry(p)),
@@ -207,7 +203,7 @@ pub enum SetValue {
 #[derive(Clone, Debug)]
 pub struct Set {
     pub name: Spur,
-    pub dims: Vec<SetDomainPart>,
+    pub domain: Domain,
     pub dimen: Option<u32>,
     pub within: Option<String>,
     pub cross: Option<String>,
@@ -219,7 +215,7 @@ pub struct Set {
 impl Set {
     pub fn from_entry(entry: Pair<Rule>) -> Self {
         let mut name: Option<Spur> = None;
-        let mut dims = Vec::new();
+        let mut domain = Domain::default();
         let mut dimen = None;
         let mut within = None;
         let mut cross = None;
@@ -230,13 +226,7 @@ impl Set {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::id => name = Some(intern(pair.as_str())),
-                Rule::simple_domain => {
-                    for inner in pair.into_inner() {
-                        if inner.as_rule() == Rule::simple_domain_part {
-                            dims.push(SetDomainPart::from_simple_domain_part(inner));
-                        }
-                    }
-                }
+                Rule::domain => domain = Domain::from_entry(pair),
                 Rule::set_attrib => {
                     let inner = pair.into_inner().next().unwrap();
                     match inner.as_rule() {
@@ -281,7 +271,7 @@ impl Set {
 
         Self {
             name: name.unwrap(),
-            dims,
+            domain,
             dimen,
             within,
             cross,
@@ -299,60 +289,11 @@ impl fmt::Display for Set {
 }
 
 #[derive(Clone, Debug)]
-pub struct SetDomainPart {
-    pub id: Option<Spur>,
-    pub set: Spur,
-}
-
-impl SetDomainPart {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
-        let mut id: Option<Spur> = None;
-        let mut set: Option<Spur> = None;
-
-        for pair in entry.into_inner() {
-            match pair.as_rule() {
-                Rule::id => id = Some(intern(pair.as_str())),
-                Rule::domain_set => set = Some(intern(pair.as_str())),
-                _ => {}
-            }
-        }
-
-        Self {
-            id,
-            set: set.unwrap(),
-        }
-    }
-
-    /// Parse from simple_domain_part (used in SET declarations)
-    /// Grammar: simple_domain_part = { (id ~ "in")? ~ domain_set }
-    pub fn from_simple_domain_part(entry: Pair<Rule>) -> Self {
-        let mut id: Option<Spur> = None;
-        let mut set: Option<Spur> = None;
-
-        for pair in entry.into_inner() {
-            match pair.as_rule() {
-                Rule::id => {
-                    // In simple_domain_part, id comes before "in" keyword
-                    // If we already have an id, this shouldn't happen
-                    id = Some(intern(pair.as_str()));
-                }
-                Rule::domain_set => set = Some(intern(pair.as_str())),
-                _ => {}
-            }
-        }
-
-        Self {
-            id,
-            set: set.unwrap(),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
 pub enum SetExpr {
     Domain(Domain),
     SetMath(SetMath),
     SetOf(SetOf),
+    Ref(SetRef),
 }
 
 impl SetExpr {
@@ -362,7 +303,40 @@ impl SetExpr {
             Rule::domain => SetExpr::Domain(Domain::from_entry(inner)),
             Rule::set_inter => SetExpr::SetMath(SetMath::from_entry(inner)),
             Rule::set_setof => SetExpr::SetOf(SetOf::from_entry(inner)),
+            Rule::set_ref => SetExpr::Ref(SetRef::from_entry(inner)),
             _ => unreachable!("Unexpected rule in set_expr: {:?}", inner.as_rule()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SetRef {
+    pub spur: Spur,
+    pub index: Index,
+}
+
+impl SetRef {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        let mut spur = None;
+        let mut index = smallvec![];
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::id => spur = Some(intern(pair.as_str())),
+                Rule::index => {
+                    for inner in pair.into_inner() {
+                        if inner.as_rule() == Rule::set_val {
+                            index.push(SetVal::from_entry(inner));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Self {
+            spur: spur.unwrap(),
+            index,
         }
     }
 }
@@ -984,7 +958,7 @@ impl fmt::Display for ParamDataRow {
 pub enum Entry {
     Var(Var),
     Param(Param),
-    Set(Set),
+    Set(Box<Set>),
     Objective(Objective),
     Constraint(Constraint),
     Check(Check),
@@ -1099,6 +1073,16 @@ pub enum LogicExpr {
         op: RelOp,
         rhs: Expr,
     },
+    Membership {
+        lhs: SetVals,
+        op: MemberOp,
+        rhs: Box<SetExpr>,
+    },
+    Subset {
+        lhs: Box<SetExpr>,
+        op: SubsetOp,
+        rhs: Box<SetExpr>,
+    },
     BoolOp {
         lhs: Box<LogicExpr>,
         op: BoolOp,
@@ -1116,12 +1100,26 @@ impl LogicExpr {
 fn parse_logic_expr(pairs: Pairs<Rule>) -> LogicExpr {
     LOGIC_PRATT
         .map_primary(|primary| match primary.as_rule() {
-            Rule::comparison => {
+            Rule::logic_compare => {
                 let mut inner = primary.into_inner();
                 let lhs = Expr::from_entry(inner.next().unwrap());
                 let op = RelOp::from_entry(inner.next().unwrap());
                 let rhs = Expr::from_entry(inner.next().unwrap());
                 LogicExpr::Comparison { lhs, op, rhs }
+            }
+            Rule::logic_member => {
+                let mut inner = primary.into_inner();
+                let lhs = parse_set_vals_or_tuples(inner.next().unwrap());
+                let op = MemberOp::from_entry(inner.next().unwrap());
+                let rhs = Box::new(SetExpr::from_entry(inner.next().unwrap()));
+                LogicExpr::Membership { lhs, op, rhs }
+            }
+            Rule::logic_subset => {
+                let mut inner = primary.into_inner();
+                let lhs = Box::new(SetExpr::from_entry(inner.next().unwrap()));
+                let op = SubsetOp::from_entry(inner.next().unwrap());
+                let rhs = Box::new(SetExpr::from_entry(inner.next().unwrap()));
+                LogicExpr::Subset { lhs, op, rhs }
             }
             Rule::logic_compound => {
                 let inner = primary.into_inner().next().unwrap();
@@ -1149,6 +1147,8 @@ impl fmt::Display for LogicExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             LogicExpr::Comparison { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
+            LogicExpr::Membership { op, .. } => write!(f, "(<tuple> {} <set>)", op),
+            LogicExpr::Subset { op, .. } => write!(f, "(<set> {} <set>)", op),
             LogicExpr::BoolOp { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
         }
     }
@@ -1250,7 +1250,7 @@ impl fmt::Display for SetValTerminal {
 }
 
 /// Domain specification
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Domain {
     pub parts: Vec<DomainPart>,
     pub condition: Option<LogicExpr>,
@@ -1340,6 +1340,7 @@ impl fmt::Display for DomainPart {
 
 #[derive(Clone, Debug)]
 pub enum DomainPartVar {
+    None,
     Single(Spur),
     Tuple(Vec<Spur>),
 }
@@ -1347,6 +1348,7 @@ pub enum DomainPartVar {
 impl fmt::Display for DomainPartVar {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            DomainPartVar::None => write!(f, ""),
             DomainPartVar::Single(s) => write!(f, "{}", intern_resolve(*s)),
             DomainPartVar::Tuple(v) => {
                 let strs: Vec<&str> = v.iter().map(|s| intern_resolve(*s)).collect();
@@ -1435,6 +1437,58 @@ impl fmt::Display for MathOp {
             MathOp::Mul => write!(f, "*"),
             MathOp::Div => write!(f, "/"),
             MathOp::Pow => write!(f, "^"),
+        }
+    }
+}
+
+/// Membership operator (tuple in set)
+#[derive(Clone, Copy, Debug)]
+pub enum MemberOp {
+    In,
+    NotIn,
+}
+
+impl MemberOp {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        match entry.as_str() {
+            "in" => MemberOp::In,
+            "not in" | "!in" => MemberOp::NotIn,
+            _ => unreachable!("Unexpected member_op: {}", entry.as_str()),
+        }
+    }
+}
+
+impl fmt::Display for MemberOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            MemberOp::In => write!(f, "in"),
+            MemberOp::NotIn => write!(f, "not in"),
+        }
+    }
+}
+
+/// Subset operator (set within set)
+#[derive(Clone, Copy, Debug)]
+pub enum SubsetOp {
+    Within,
+    NotWithin,
+}
+
+impl SubsetOp {
+    pub fn from_entry(entry: Pair<Rule>) -> Self {
+        match entry.as_str() {
+            "within" => SubsetOp::Within,
+            "not within" | "!within" => SubsetOp::NotWithin,
+            _ => unreachable!("Unexpected subset_op: {}", entry.as_str()),
+        }
+    }
+}
+
+impl fmt::Display for SubsetOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SubsetOp::Within => write!(f, "within"),
+            SubsetOp::NotWithin => write!(f, "not within"),
         }
     }
 }

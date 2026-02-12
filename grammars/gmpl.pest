@@ -34,7 +34,7 @@ model_entry = _{
 
 // Variable
 // Example: var Demand >= 0;
-VAR        = { "var" ~ name ~ (domain | simple_domain)? ~ (","? ~ var_attrib)* ~ ";" }
+VAR        = { "var" ~ name ~ domain? ~ (","? ~ var_attrib)* ~ ";" }
 var_attrib = { var_bounds | var_type }
 var_bounds = { rel_op ~ number }
 var_type      =  { "integer" | "binary" }
@@ -42,7 +42,7 @@ var_type      =  { "integer" | "binary" }
 // Parameter
 // The comma separator seems to be optional
 // Example: param Discount{r in REGION} := (1 + DiscountRate[r])
-PARAM           =  { "param" ~ name ~ (domain | simple_domain)? ~ (","? ~ param_attrib)* ~ param_assign? ~ ";" }
+PARAM           =  { "param" ~ name ~ domain? ~ (","? ~ param_attrib)* ~ param_assign? ~ ";" }
 param_attrib    = _{ param_type | param_condition | param_in | param_default }
 param_type      =  { "integer" | "binary" | "symbolic" }
 param_condition =  { rel_op ~ expr }
@@ -53,12 +53,13 @@ param_default   =  { "default" ~ (expr | string_literal) }
 
 // Set
 // Example: set DAILYTIMEBRACKET;
-SET             =  { "set" ~ id ~ simple_domain? ~ (","? ~ set_attrib)* ~ ";" }
+SET             =  { "set" ~ id ~ domain? ~ (","? ~ set_attrib)* ~ ";" }
 set_attrib      =  { set_dimen | set_within | set_assign | set_default }
 set_dimen       =  { "dimen" ~ int }
 set_assign      =  { ":=" ~ (set_expr | set_vals | set_tuples) }
 set_default     =  { "default" ~ ( set_expr | set_vals | set_tuples) }
-set_expr        =  { domain | set_inter | set_setof }
+set_expr        =  { domain | set_inter | set_setof | set_ref }
+set_ref         =  { id ~ index? }
 set_inter       =  { var_subscripted ~ ("inter" ~ var_subscripted)+ }
 set_setof       =  { "setof" ~ domain ~ domain_var }
 
@@ -121,8 +122,8 @@ data_entry = _{
 SET_DATA         = { "set" ~ id ~ index? ~ set_data_assign? ~ ";" }
 set_data_assign  = { ":=" ~ (set_vals | set_tuples)? }
 set_tuples       = { set_tuple+ }
-set_tuple        = { "(" ~ set_val ~ "," ~ set_val ~ ")" }
-set_vals         = { set_val+ }
+set_tuple        = { "(" ~ set_val ~ ("," ~ set_val)+ ~ ")" }
+set_vals         = { (","? ~ set_val)+ }
 set_val          = { id | int }
 
 // Index
@@ -132,7 +133,7 @@ index  =  { "[" ~ set_val ~ ("," ~ set_val)* ~ "]" }
 
 // Data: Param
 PARAM_DATA          =  {
-    "param" ~ id ~ simple_domain? ~ ("default" ~ param_data_default)? ~ ":="? ~ param_data_body? ~ ";"
+    "param" ~ id ~ domain? ~ ("default" ~ param_data_default)? ~ ":="? ~ param_data_body? ~ ";"
 }
 param_data_default  = @{ number }
 param_data_body =      { param_data_symbolic | param_data_matrix+ | param_data_list | param_data_scalar }
@@ -156,25 +157,22 @@ param_data_any      =  { "*" }
 // example:
 // {r in REG, t in TECH:Capacity[r,t,y]<>0}
 domain             =  { "{" ~ (domain_part ~ ","?)+ ~ (":" ~ logic_expr)? ~ "}" }
-domain_part        =  { domain_var ~ "in" ~ domain_set ~ subscript? }
+domain_part        =  { (domain_var ~ "in")? ~ domain_set ~ subscript? }
 domain_var         =  { domain_var_single | domain_var_tuple }
 domain_var_single  = @{ id }
 domain_var_tuple   = { "(" ~ id ~ ("," ~ id)+ ~ ")" }
 domain_set         = @{ id }
-
-// Simple domain
-// (Without var assignment)
-simple_domain      =  { "{" ~ (simple_domain_part ~ ","?)+ ~ "}" }
-simple_domain_part =  { (id ~ "in")? ~ domain_set }
 
 // Logical expression
 // Expressions that evaluate to true or false
 // Uses Pratt parser for proper operator precedence (and > or)
 // Example: Demand[r] <> 0
 logic_expr     =  { logic_primary ~ (logic_infix ~ logic_primary)* }
-logic_primary  = _{ comparison | logic_compound }
+logic_primary  = _{ logic_compare | logic_member | logic_subset | logic_compound }
 logic_infix    = _{ bool_and | bool_or }
-comparison     =  { expr ~ rel_op ~ expr }
+logic_compare  =  { expr ~ rel_op ~ expr }
+logic_member   =  { set_tuple ~ member_op ~ set_expr }
+logic_subset   =  { set_expr ~ subset_op ~ set_expr }
 logic_compound =  { "(" ~ logic_expr ~ ")" }
 
 // Subscripted var or param
@@ -213,6 +211,8 @@ func_var         = @{ id }
 bool_and         =  { "and" | "&&" }
 bool_or          =  { "or" | "||" }
 rel_op           =  { "<=" | "<>" | "<" | "==" | "=" | ">=" | ">" | "!=" }
+member_op        =  { "in" | "not in" | "!in" }
+subset_op        =  { "within" | "not within" | "!within" }
 
 // //////////////////////
 // GRAMMAR BASICS
