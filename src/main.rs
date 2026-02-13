@@ -47,7 +47,6 @@ enum Commands {
 }
 
 fn run() -> anyhow::Result<()> {
-    env_logger::init();
     let cli = Cli::parse();
     match &cli.command {
         Commands::Compile { path, data_path } => {
