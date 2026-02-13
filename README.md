@@ -1,6 +1,6 @@
 # mosox
 
-An LP matrix generator for GMPL (GNU MathProg).
+An LP matrix generator for [GMPL (MathProg)](https://en.wikibooks.org/wiki/GLPK/GMPL_(MathProg)) and (by extension) [AMPL](https://en.wikipedia.org/wiki/AMPL).
 
 Can be used in two ways:
 - Compile an MPS file for solving elsewhere
@@ -9,8 +9,9 @@ Can be used in two ways:
 **Currently a work-in-progress.**
 
 It works for a subset of GMPL (specifically the subset required to run [Osemosys](https://osemosys.github.io/)).
-The goal is to full coverage of GMPL and compatibility with GLPK, but this may take a while.
 See [Known limitations](#known-limitations) section below.
+
+There are a number of examples of varying complexity in the [examples/](./examples/) directory.
 
 ## Quickstart
 

@@ -6,6 +6,7 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
+use anyhow::{Context, Result, bail, ensure};
 use lasso::Spur;
 use pest::iterators::Pair;
 use pest::iterators::Pairs;
@@ -46,7 +47,7 @@ pub struct Var {
 }
 
 impl Var {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut name: Option<Spur> = None;
         let mut domain = None;
         let mut bounds = Vec::new();
@@ -55,12 +56,12 @@ impl Var {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::name => name = Some(intern(pair.as_str())),
-                Rule::domain => domain = Some(Domain::from_entry(pair)),
+                Rule::domain => domain = Some(Domain::from_entry(pair)?),
                 Rule::var_attrib => {
                     for inner in pair.into_inner() {
                         match inner.as_rule() {
-                            Rule::var_bounds => bounds.push(VarBounds::from_entry(inner)),
-                            Rule::var_type => var_type = VarType::from_entry(inner),
+                            Rule::var_bounds => bounds.push(VarBounds::from_entry(inner)?),
+                            Rule::var_type => var_type = VarType::from_entry(inner)?,
                             _ => {}
                         }
                     }
@@ -69,12 +70,12 @@ impl Var {
             }
         }
 
-        Self {
-            name: name.unwrap(),
+        Ok(Self {
+            name: name.context("missing var name")?,
             domain,
             bounds,
             var_type,
-        }
+        })
     }
 }
 
@@ -114,7 +115,7 @@ pub struct Param {
 }
 
 impl Param {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut name: Option<Spur> = None;
         let mut domain = None;
         let mut param_type = ParamType::default();
@@ -126,10 +127,12 @@ impl Param {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::name => name = Some(intern(pair.as_str())),
-                Rule::domain => domain = Some(Domain::from_entry(pair)),
-                Rule::param_type => param_type = ParamType::from_entry(pair),
-                Rule::param_condition => conditions.push(ParamCondition::from_entry(pair)),
-                Rule::param_in => param_in = pair.into_inner().next().map(|p| Expr::from_entry(p)),
+                Rule::domain => domain = Some(Domain::from_entry(pair)?),
+                Rule::param_type => param_type = ParamType::from_entry(pair)?,
+                Rule::param_condition => conditions.push(ParamCondition::from_entry(pair)?),
+                Rule::param_in => {
+                    param_in = pair.into_inner().next().map(Expr::from_entry).transpose()?;
+                }
                 Rule::param_default => {
                     if let Some(p) = pair
                         .into_inner()
@@ -137,30 +140,30 @@ impl Param {
                         // ignore symbolic string_literal -> only used for file path
                         .filter(|p| p.as_rule() == Rule::expr)
                     {
-                        default = Some(Expr::from_entry(p));
+                        default = Some(Expr::from_entry(p)?);
                     }
                 }
                 Rule::param_assign => {
-                    let inner = pair.into_inner().next().unwrap();
+                    let inner = pair.into_inner().next().context("empty param_assign")?;
                     assign = Some(match inner.as_rule() {
-                        Rule::expr => ParamAssign::Expr(Expr::from_entry(inner)),
-                        Rule::param_data_body => ParamAssign::Data(parse_param_data_body(inner)),
-                        _ => unreachable!("Unexpected rule in param_assign: {:?}", inner.as_rule()),
+                        Rule::expr => ParamAssign::Expr(Expr::from_entry(inner)?),
+                        Rule::param_data_body => ParamAssign::Data(parse_param_data_body(inner)?),
+                        _ => bail!("Unexpected rule in param_assign: {:?}", inner.as_rule()),
                     });
                 }
                 _ => {}
             }
         }
 
-        Self {
-            name: name.unwrap(),
+        Ok(Self {
+            name: name.context("missing param name")?,
             domain,
             param_type,
             conditions,
             param_in,
             default,
             assign,
-        }
+        })
     }
 }
 
@@ -212,7 +215,7 @@ pub struct Set {
 }
 
 impl Set {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut name: Option<Spur> = None;
         let mut domain = Domain::default();
         let mut dimen = None;
@@ -225,13 +228,13 @@ impl Set {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::name => name = Some(intern(pair.as_str())),
-                Rule::domain => domain = Domain::from_entry(pair),
+                Rule::domain => domain = Domain::from_entry(pair)?,
                 Rule::set_attrib => {
-                    let inner = pair.into_inner().next().unwrap();
+                    let inner = pair.into_inner().next().context("empty set_attrib")?;
                     match inner.as_rule() {
                         Rule::set_dimen => {
-                            let int_pair = inner.into_inner().next().unwrap();
-                            dimen = Some(int_pair.as_str().parse().unwrap());
+                            let int_pair = inner.into_inner().next().context("empty set_dimen")?;
+                            dimen = Some(int_pair.as_str().parse()?);
                         }
                         Rule::set_within => {
                             for p in inner.into_inner() {
@@ -243,22 +246,24 @@ impl Set {
                             }
                         }
                         Rule::set_assign => {
-                            let assign_inner = inner.into_inner().next().unwrap();
+                            let assign_inner =
+                                inner.into_inner().next().context("empty set_assign")?;
                             match assign_inner.as_rule() {
-                                Rule::set_expr => expr = Some(SetExpr::from_entry(assign_inner)),
+                                Rule::set_expr => expr = Some(SetExpr::from_entry(assign_inner)?),
                                 Rule::set_vals | Rule::set_tuples => {
-                                    inline_data = Some(parse_set_vals_or_tuples(assign_inner));
+                                    inline_data = Some(parse_set_vals_or_tuples(assign_inner)?);
                                 }
                                 _ => {}
                             }
                         }
                         Rule::set_default => {
-                            let default_inner = inner.into_inner().next().unwrap();
+                            let default_inner =
+                                inner.into_inner().next().context("empty set_default")?;
                             default = Some(match default_inner.as_rule() {
                                 Rule::set_expr => {
-                                    SetValue::Expr(SetExpr::from_entry(default_inner))
+                                    SetValue::Expr(SetExpr::from_entry(default_inner)?)
                                 }
-                                _ => SetValue::Vals(parse_set_vals_or_tuples(default_inner)),
+                                _ => SetValue::Vals(parse_set_vals_or_tuples(default_inner)?),
                             });
                         }
                         _ => {}
@@ -268,8 +273,8 @@ impl Set {
             }
         }
 
-        Self {
-            name: name.unwrap(),
+        Ok(Self {
+            name: name.context("missing set name")?,
             domain,
             dimen,
             within,
@@ -277,7 +282,7 @@ impl Set {
             expr,
             inline_data,
             default,
-        }
+        })
     }
 }
 
@@ -296,15 +301,15 @@ pub enum SetExpr {
 }
 
 impl SetExpr {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
-        let inner = entry.into_inner().next().unwrap();
-        match inner.as_rule() {
-            Rule::domain => SetExpr::Domain(Domain::from_entry(inner)),
-            Rule::set_inter => SetExpr::SetMath(SetMath::from_entry(inner)),
-            Rule::set_setof => SetExpr::SetOf(SetOf::from_entry(inner)),
-            Rule::set_ref => SetExpr::Ref(SetRef::from_entry(inner)),
-            _ => unreachable!("Unexpected rule in set_expr: {:?}", inner.as_rule()),
-        }
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        let inner = entry.into_inner().next().context("empty set_expr")?;
+        Ok(match inner.as_rule() {
+            Rule::domain => SetExpr::Domain(Domain::from_entry(inner)?),
+            Rule::set_inter => SetExpr::SetMath(SetMath::from_entry(inner)?),
+            Rule::set_setof => SetExpr::SetOf(SetOf::from_entry(inner)?),
+            Rule::set_ref => SetExpr::Ref(SetRef::from_entry(inner)?),
+            _ => bail!("Unexpected rule in set_expr: {:?}", inner.as_rule()),
+        })
     }
 }
 
@@ -315,7 +320,7 @@ pub struct SetRef {
 }
 
 impl SetRef {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut spur = None;
         let mut index = smallvec![];
 
@@ -325,7 +330,7 @@ impl SetRef {
                 Rule::index => {
                     for inner in pair.into_inner() {
                         if inner.as_rule() == Rule::set_val {
-                            index.push(SetVal::from_entry(inner));
+                            index.push(SetVal::from_entry(inner)?);
                         }
                     }
                 }
@@ -333,10 +338,10 @@ impl SetRef {
             }
         }
 
-        Self {
-            spur: spur.unwrap(),
+        Ok(Self {
+            spur: spur.context("missing set ref id")?,
             index,
-        }
+        })
     }
 }
 
@@ -346,13 +351,13 @@ pub struct SetMath {
 }
 
 impl SetMath {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let intersection = entry
             .into_inner()
             .filter(|p| p.as_rule() == Rule::var_subscripted)
             .map(VarSubscripted::from_entry)
-            .collect();
-        Self { intersection }
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self { intersection })
     }
 }
 
@@ -363,15 +368,15 @@ pub struct SetOf {
 }
 
 impl SetOf {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut domain = None;
         let mut integrand = DomainPartVar::Single(intern(""));
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::domain => domain = Some(Domain::from_entry(pair)),
+                Rule::domain => domain = Some(Domain::from_entry(pair)?),
                 Rule::domain_var => {
-                    let inner = pair.into_inner().next().unwrap();
+                    let inner = pair.into_inner().next().context("empty domain_var")?;
                     integrand = match inner.as_rule() {
                         Rule::domain_var_single => DomainPartVar::Single(intern(inner.as_str())),
                         Rule::domain_var_tuple => {
@@ -382,17 +387,17 @@ impl SetOf {
                                 .collect();
                             DomainPartVar::Tuple(ids)
                         }
-                        _ => unreachable!(),
+                        _ => bail!("unexpected domain_var variant: {:?}", inner.as_rule()),
                     };
                 }
                 _ => {}
             }
         }
 
-        Self {
-            domain: domain.unwrap(),
+        Ok(Self {
+            domain: domain.context("missing setof domain")?,
             integrand,
-        }
+        })
     }
 }
 
@@ -405,25 +410,25 @@ pub struct Objective {
 }
 
 impl Objective {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut sense = ObjSense::Minimize;
         let mut name: Option<Spur> = None;
         let mut expr = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::obj_sense => sense = ObjSense::from_entry(pair),
+                Rule::obj_sense => sense = ObjSense::from_entry(pair)?,
                 Rule::name => name = Some(intern(pair.as_str())),
-                Rule::expr => expr = Some(Expr::from_entry(pair)),
+                Rule::expr => expr = Some(Expr::from_entry(pair)?),
                 _ => {}
             }
         }
 
-        Self {
+        Ok(Self {
             sense,
-            name: name.unwrap(),
-            expr: expr.unwrap(),
-        }
+            name: name.context("missing objective name")?,
+            expr: expr.context("missing objective expr")?,
+        })
     }
 }
 
@@ -442,7 +447,7 @@ pub struct Constraint {
 }
 
 impl Constraint {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut name: Option<Spur> = None;
         let mut domain = None;
         let mut constraint_expr = None;
@@ -450,17 +455,17 @@ impl Constraint {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::name => name = Some(intern(pair.as_str())),
-                Rule::domain => domain = Some(Domain::from_entry(pair)),
-                Rule::constraint_expr => constraint_expr = Some(ConstraintExpr::from_entry(pair)),
+                Rule::domain => domain = Some(Domain::from_entry(pair)?),
+                Rule::constraint_expr => constraint_expr = Some(ConstraintExpr::from_entry(pair)?),
                 _ => {}
             }
         }
 
-        Self {
-            name: name.unwrap(),
+        Ok(Self {
+            name: name.context("missing constraint name")?,
             domain,
-            expr: constraint_expr.unwrap(),
-        }
+            expr: constraint_expr.context("missing constraint expr")?,
+        })
     }
 }
 
@@ -483,24 +488,24 @@ pub struct Check {
 }
 
 impl Check {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let (line_no, _) = entry.line_col();
         let mut domain = None;
         let mut expr = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::domain => domain = Some(Domain::from_entry(pair)),
-                Rule::logic_expr => expr = Some(LogicExpr::from_entry(pair)),
+                Rule::domain => domain = Some(Domain::from_entry(pair)?),
+                Rule::logic_expr => expr = Some(LogicExpr::from_entry(pair)?),
                 _ => {}
             }
         }
 
-        Self {
+        Ok(Self {
             line_no: line_no as i32,
             domain,
-            expr: expr.unwrap(),
-        }
+            expr: expr.context("missing check expr")?,
+        })
     }
 }
 
@@ -523,7 +528,7 @@ pub struct SetData {
 }
 
 impl SetData {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut name: Option<Spur> = None;
         let mut index = smallvec![];
         let mut values = SetVals::default();
@@ -533,23 +538,23 @@ impl SetData {
                 Rule::id => name = Some(intern(pair.as_str())),
                 Rule::index => {
                     for inner in pair.into_inner() {
-                        if inner.as_rule() == Rule::set_val {
-                            index.push(SetVal::from_entry(inner));
+                        if inner.as_rule() == Rule::set_val_data {
+                            index.push(SetVal::from_entry(inner)?);
                         }
                     }
                 }
-                Rule::set_data_assign => {
-                    values = parse_set_assign(pair);
+                Rule::set_assign_data => {
+                    values = parse_set_assign(pair)?;
                 }
                 _ => {}
             }
         }
 
-        Self {
-            name: name.unwrap(),
+        Ok(Self {
+            name: name.context("missing set data name")?,
             index,
             values,
-        }
+        })
     }
 }
 
@@ -572,15 +577,19 @@ pub struct ParamDataPair {
 }
 
 impl ParamDataPair {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut tokens = entry.into_inner();
-        let key = tokens.next().unwrap().as_str();
+        let key = tokens.next().context("missing param data key")?.as_str();
         let key = key
             .parse::<u32>()
             .map(SetVal::Int)
             .unwrap_or_else(|_| SetVal::Str(intern(key)));
-        let value = tokens.next().unwrap().as_str().parse().unwrap();
-        Self { key, value }
+        let value: f64 = tokens
+            .next()
+            .context("missing param data value")?
+            .as_str()
+            .parse()?;
+        Ok(Self { key, value })
     }
 }
 
@@ -600,7 +609,7 @@ pub struct ParamData {
 }
 
 impl ParamData {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut name: Option<Spur> = None;
         let mut default = None;
         let mut body = None;
@@ -608,19 +617,19 @@ impl ParamData {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::id => name = Some(intern(pair.as_str())),
-                Rule::param_data_default => default = Some(pair.as_str().parse().unwrap()),
+                Rule::param_data_default => default = Some(pair.as_str().parse()?),
                 Rule::param_data_body => {
-                    body = Some(parse_param_data_body(pair));
+                    body = Some(parse_param_data_body(pair)?);
                 }
                 _ => {}
             }
         }
 
-        Self {
-            name: name.unwrap(),
+        Ok(Self {
+            name: name.context("missing param data name")?,
             default,
             body,
-        }
+        })
     }
 }
 
@@ -658,13 +667,13 @@ pub struct ConstraintExpr {
 }
 
 impl ConstraintExpr {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut pairs = entry.into_inner();
-        let lhs = Expr::from_entry(pairs.next().unwrap());
-        let op = RelOp::from_entry(pairs.next().unwrap());
-        let rhs = Expr::from_entry(pairs.next().unwrap());
+        let lhs = Expr::from_entry(pairs.next().context("missing constraint lhs")?)?;
+        let op = RelOp::from_entry(pairs.next().context("missing constraint op")?)?;
+        let rhs = Expr::from_entry(pairs.next().context("missing constraint rhs")?)?;
 
-        Self { lhs, op, rhs }
+        Ok(Self { lhs, op, rhs })
     }
 }
 
@@ -684,12 +693,12 @@ pub enum VarType {
 }
 
 impl VarType {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
-        match entry.as_str() {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        Ok(match entry.as_str() {
             "integer" => VarType::Integer,
             "binary" => VarType::Binary,
             _ => VarType::Float,
-        }
+        })
     }
 }
 
@@ -714,13 +723,13 @@ pub enum ParamType {
 }
 
 impl ParamType {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
-        match entry.as_str() {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        Ok(match entry.as_str() {
             "integer" => ParamType::Integer,
             "binary" => ParamType::Binary,
             "symbolic" => ParamType::Symbolic,
             _ => ParamType::Float,
-        }
+        })
     }
 }
 
@@ -743,12 +752,12 @@ pub enum ObjSense {
 }
 
 impl ObjSense {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
-        match entry.as_str() {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        Ok(match entry.as_str() {
             "minimize" => ObjSense::Minimize,
             "maximize" => ObjSense::Maximize,
             _ => ObjSense::Minimize,
-        }
+        })
     }
 }
 
@@ -769,19 +778,19 @@ pub struct VarBounds {
 }
 
 impl VarBounds {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut op = RelOp::Ge;
         let mut value = 0.0;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::rel_op => op = RelOp::from_entry(pair),
+                Rule::rel_op => op = RelOp::from_entry(pair)?,
                 Rule::number => value = pair.as_str().parse().unwrap_or(0.0),
                 _ => {}
             }
         }
 
-        Self { op, value }
+        Ok(Self { op, value })
     }
 }
 
@@ -799,22 +808,22 @@ pub struct ParamCondition {
 }
 
 impl ParamCondition {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut op = RelOp::Ge;
         let mut value = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::rel_op => op = RelOp::from_entry(pair),
-                Rule::expr => value = Some(Expr::from_entry(pair)),
+                Rule::rel_op => op = RelOp::from_entry(pair)?,
+                Rule::expr => value = Some(Expr::from_entry(pair)?),
                 _ => {}
             }
         }
 
-        Self {
+        Ok(Self {
             op,
-            value: value.unwrap(),
-        }
+            value: value.context("missing param condition value")?,
+        })
     }
 }
 
@@ -833,7 +842,7 @@ pub struct ParamDataTable {
 }
 
 impl ParamDataTable {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut target = None;
         let mut cols: Vec<SetVal> = Vec::new();
         let mut rows = Vec::new();
@@ -844,8 +853,8 @@ impl ParamDataTable {
                     let mut targets = Vec::new();
                     for inner in pair.into_inner() {
                         match inner.as_rule() {
-                            Rule::set_val => {
-                                targets.push(ParamDataTarget::IndexVar(SetVal::from_entry(inner)))
+                            Rule::set_val_data => {
+                                targets.push(ParamDataTarget::IndexVar(SetVal::from_entry(inner)?))
                             }
                             Rule::param_data_any => targets.push(ParamDataTarget::Any),
                             _ => {}
@@ -855,7 +864,7 @@ impl ParamDataTable {
                 }
                 Rule::param_data_cols => {
                     for inner in pair.into_inner() {
-                        if inner.as_rule() == Rule::set_val {
+                        if inner.as_rule() == Rule::set_val_data {
                             let raw = inner.as_str();
                             let col = raw
                                 .parse::<u32>()
@@ -865,12 +874,12 @@ impl ParamDataTable {
                         }
                     }
                 }
-                Rule::param_data_row => rows.push(ParamDataRow::from_entry(pair)),
+                Rule::param_data_row => rows.push(ParamDataRow::from_entry(pair)?),
                 _ => {}
             }
         }
 
-        Self { target, cols, rows }
+        Ok(Self { target, cols, rows })
     }
 }
 
@@ -907,13 +916,13 @@ pub struct ParamDataRow {
 }
 
 impl ParamDataRow {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut label: Option<SetVal> = None;
         let mut values = Vec::new();
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::set_val => {
+                Rule::set_val_data => {
                     if label.is_none() {
                         let raw = pair.as_str();
                         label = Some(
@@ -935,10 +944,10 @@ impl ParamDataRow {
             }
         }
 
-        Self {
-            label: label.unwrap(),
+        Ok(Self {
+            label: label.context("missing param data row label")?,
             values,
-        }
+        })
     }
 }
 
@@ -998,53 +1007,61 @@ pub enum Expr {
 }
 
 impl Expr {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         parse_expr(entry.into_inner())
     }
 }
 
 /// Parse expression using Pratt parser for correct precedence
-pub fn parse_expr(pairs: Pairs<Rule>) -> Expr {
+pub fn parse_expr(pairs: Pairs<Rule>) -> Result<Expr> {
     PRATT_PARSER
         .map_primary(|primary| match primary.as_rule() {
-            Rule::number => Expr::Number(primary.as_str().parse().unwrap_or(0.0)),
-            Rule::var_subscripted => Expr::VarSubscripted(VarSubscripted::from_entry(primary)),
-            Rule::func_min => Expr::FuncMin(Box::new(FuncMin::from_entry(primary))),
-            Rule::func_max => Expr::FuncMax(Box::new(FuncMax::from_entry(primary))),
-            Rule::conditional => Expr::Conditional(Box::new(Conditional::from_entry(primary))),
+            Rule::number => Ok(Expr::Number(primary.as_str().parse().unwrap_or(0.0))),
+            Rule::var_subscripted => Ok(Expr::VarSubscripted(VarSubscripted::from_entry(primary)?)),
+            Rule::func_min => Ok(Expr::FuncMin(Box::new(FuncMin::from_entry(primary)?))),
+            Rule::func_max => Ok(Expr::FuncMax(Box::new(FuncMax::from_entry(primary)?))),
+            Rule::conditional => Ok(Expr::Conditional(Box::new(Conditional::from_entry(
+                primary,
+            )?))),
             Rule::expr => parse_expr(primary.into_inner()),
-            rule => unreachable!("Expected primary, found {:?}", rule),
+            rule => bail!("Expected primary, found {:?}", rule),
         })
-        .map_prefix(|op, rhs| match op.as_rule() {
-            Rule::neg => Expr::UnaryNeg(Box::new(rhs)),
-            Rule::sum_prefix => {
-                // Extract domain from sum_prefix
-                let domain = op
-                    .into_inner()
-                    .find(|p| p.as_rule() == Rule::domain)
-                    .map(Domain::from_entry)
-                    .expect("sum_prefix must have domain");
-                Expr::FuncSum(Box::new(FuncSum {
-                    domain,
-                    operand: Box::new(rhs),
-                }))
+        .map_prefix(|op, rhs| {
+            let rhs = rhs?;
+            match op.as_rule() {
+                Rule::neg => Ok(Expr::UnaryNeg(Box::new(rhs))),
+                Rule::sum_prefix => {
+                    // Extract domain from sum_prefix
+                    let domain = op
+                        .into_inner()
+                        .find(|p| p.as_rule() == Rule::domain)
+                        .map(Domain::from_entry)
+                        .transpose()?
+                        .context("sum_prefix must have domain")?;
+                    Ok(Expr::FuncSum(Box::new(FuncSum {
+                        domain,
+                        operand: Box::new(rhs),
+                    })))
+                }
+                rule => bail!("Expected prefix op, found {:?}", rule),
             }
-            rule => unreachable!("Expected prefix op, found {:?}", rule),
         })
         .map_infix(|lhs, op, rhs| {
+            let lhs = lhs?;
+            let rhs = rhs?;
             let op = match op.as_rule() {
                 Rule::add => MathOp::Add,
                 Rule::sub => MathOp::Sub,
                 Rule::mul => MathOp::Mul,
                 Rule::div => MathOp::Div,
                 Rule::pow => MathOp::Pow,
-                rule => unreachable!("Expected infix op, found {:?}", rule),
+                rule => bail!("Expected infix op, found {:?}", rule),
             };
-            Expr::BinOp {
+            Ok(Expr::BinOp {
                 lhs: Box::new(lhs),
                 op,
                 rhs: Box::new(rhs),
-            }
+            })
         })
         .parse(pairs)
 }
@@ -1090,54 +1107,66 @@ pub enum LogicExpr {
 }
 
 impl LogicExpr {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         parse_logic_expr(entry.into_inner())
     }
 }
 
 /// Parse logical expression using Pratt parser for correct precedence
-fn parse_logic_expr(pairs: Pairs<Rule>) -> LogicExpr {
+fn parse_logic_expr(pairs: Pairs<Rule>) -> Result<LogicExpr> {
     LOGIC_PRATT
         .map_primary(|primary| match primary.as_rule() {
             Rule::logic_compare => {
                 let mut inner = primary.into_inner();
-                let lhs = Expr::from_entry(inner.next().unwrap());
-                let op = RelOp::from_entry(inner.next().unwrap());
-                let rhs = Expr::from_entry(inner.next().unwrap());
-                LogicExpr::Comparison { lhs, op, rhs }
+                let lhs = Expr::from_entry(inner.next().context("missing logic compare lhs")?)?;
+                let op = RelOp::from_entry(inner.next().context("missing logic compare op")?)?;
+                let rhs = Expr::from_entry(inner.next().context("missing logic compare rhs")?)?;
+                Ok(LogicExpr::Comparison { lhs, op, rhs })
             }
             Rule::logic_member => {
                 let mut inner = primary.into_inner();
-                let lhs = parse_set_vals_or_tuples(inner.next().unwrap());
-                let op = MemberOp::from_entry(inner.next().unwrap());
-                let rhs = Box::new(SetExpr::from_entry(inner.next().unwrap()));
-                LogicExpr::Membership { lhs, op, rhs }
+                let lhs =
+                    parse_set_vals_or_tuples(inner.next().context("missing logic member lhs")?)?;
+                let op = MemberOp::from_entry(inner.next().context("missing logic member op")?)?;
+                let rhs = Box::new(SetExpr::from_entry(
+                    inner.next().context("missing logic member rhs")?,
+                )?);
+                Ok(LogicExpr::Membership { lhs, op, rhs })
             }
             Rule::logic_subset => {
                 let mut inner = primary.into_inner();
-                let lhs = Box::new(SetExpr::from_entry(inner.next().unwrap()));
-                let op = SubsetOp::from_entry(inner.next().unwrap());
-                let rhs = Box::new(SetExpr::from_entry(inner.next().unwrap()));
-                LogicExpr::Subset { lhs, op, rhs }
+                let lhs = Box::new(SetExpr::from_entry(
+                    inner.next().context("missing logic subset lhs")?,
+                )?);
+                let op = SubsetOp::from_entry(inner.next().context("missing logic subset op")?)?;
+                let rhs = Box::new(SetExpr::from_entry(
+                    inner.next().context("missing logic subset rhs")?,
+                )?);
+                Ok(LogicExpr::Subset { lhs, op, rhs })
             }
             Rule::logic_compound => {
-                let inner = primary.into_inner().next().unwrap();
+                let inner = primary
+                    .into_inner()
+                    .next()
+                    .context("empty logic_compound")?;
                 parse_logic_expr(inner.into_inner())
             }
             Rule::logic_expr => parse_logic_expr(primary.into_inner()),
-            rule => unreachable!("Expected logic primary, found {:?}", rule),
+            rule => bail!("Expected logic primary, found {:?}", rule),
         })
         .map_infix(|lhs, op, rhs| {
+            let lhs = lhs?;
+            let rhs = rhs?;
             let op = match op.as_rule() {
                 Rule::bool_and => BoolOp::And,
                 Rule::bool_or => BoolOp::Or,
-                rule => unreachable!("Expected bool op, found {:?}", rule),
+                rule => bail!("Expected bool op, found {:?}", rule),
             };
-            LogicExpr::BoolOp {
+            Ok(LogicExpr::BoolOp {
                 lhs: Box::new(lhs),
                 op,
                 rhs: Box::new(rhs),
-            }
+            })
         })
         .parse(pairs)
 }
@@ -1162,30 +1191,30 @@ pub struct Conditional {
 }
 
 impl Conditional {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut condition = None;
         let mut then_expr = None;
         let mut else_expr = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::logic_expr => condition = Some(LogicExpr::from_entry(pair)),
+                Rule::logic_expr => condition = Some(LogicExpr::from_entry(pair)?),
                 Rule::expr => {
                     if then_expr.is_none() {
-                        then_expr = Some(Box::new(Expr::from_entry(pair)));
+                        then_expr = Some(Box::new(Expr::from_entry(pair)?));
                     } else {
-                        else_expr = Some(Box::new(Expr::from_entry(pair)));
+                        else_expr = Some(Box::new(Expr::from_entry(pair)?));
                     }
                 }
                 _ => {}
             }
         }
 
-        Self {
-            condition: condition.unwrap(),
-            then_expr: then_expr.unwrap(),
+        Ok(Self {
+            condition: condition.context("missing conditional condition")?,
+            then_expr: then_expr.context("missing conditional then_expr")?,
             else_expr,
-        }
+        })
     }
 }
 
@@ -1219,13 +1248,13 @@ pub enum SetValTerminal {
 }
 
 impl SetVal {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
-        let inner = entry.into_inner().next().unwrap();
-        match inner.as_rule() {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        let inner = entry.into_inner().next().context("empty set_val")?;
+        Ok(match inner.as_rule() {
             Rule::id => SetVal::Str(intern(inner.as_str())),
             Rule::int => SetVal::Int(inner.as_str().parse().unwrap_or(0)),
             _ => SetVal::Str(intern(inner.as_str())),
-        }
+        })
     }
 }
 
@@ -1256,19 +1285,19 @@ pub struct Domain {
 }
 
 impl Domain {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut parts = Vec::new();
         let mut condition = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::domain_part => parts.push(DomainPart::from_entry(pair)),
-                Rule::logic_expr => condition = Some(LogicExpr::from_entry(pair)),
+                Rule::domain_part => parts.push(DomainPart::from_entry(pair)?),
+                Rule::logic_expr => condition = Some(LogicExpr::from_entry(pair)?),
                 _ => {}
             }
         }
 
-        Self { parts, condition }
+        Ok(Self { parts, condition })
     }
 }
 
@@ -1293,7 +1322,7 @@ pub struct DomainPart {
 }
 
 impl DomainPart {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut var = DomainPartVar::Single(intern(""));
         let mut subscript = Subscript::default();
         let mut set: Option<Spur> = None;
@@ -1301,7 +1330,7 @@ impl DomainPart {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::domain_var => {
-                    let inner = pair.into_inner().next().unwrap();
+                    let inner = pair.into_inner().next().context("empty domain_var")?;
                     var = match inner.as_rule() {
                         Rule::domain_var_single => DomainPartVar::Single(intern(inner.as_str())),
                         Rule::domain_var_tuple => {
@@ -1312,22 +1341,22 @@ impl DomainPart {
                                 .collect();
                             DomainPartVar::Tuple(ids)
                         }
-                        _ => unreachable!(),
+                        _ => bail!("unexpected domain_var variant: {:?}", inner.as_rule()),
                     };
                 }
                 Rule::subscript => {
-                    subscript = Subscript::from_entry(pair);
+                    subscript = Subscript::from_entry(pair)?;
                 }
                 Rule::domain_set => set = Some(intern(pair.as_str())),
                 _ => {}
             }
         }
 
-        Self {
+        Ok(Self {
             var,
             subscript,
-            set: set.unwrap(),
-        }
+            set: set.context("missing domain set")?,
+        })
     }
 }
 
@@ -1375,8 +1404,8 @@ pub enum RelOp {
 }
 
 impl RelOp {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
-        match entry.as_str() {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        Ok(match entry.as_str() {
             "<" => RelOp::Lt,
             "<=" => RelOp::Le,
             "=" => RelOp::Eq,
@@ -1386,7 +1415,7 @@ impl RelOp {
             ">=" => RelOp::Ge,
             ">" => RelOp::Gt,
             _ => RelOp::Eq,
-        }
+        })
     }
 }
 
@@ -1416,15 +1445,15 @@ pub enum MathOp {
 }
 
 impl MathOp {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
-        match entry.as_str() {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        Ok(match entry.as_str() {
             "+" => MathOp::Add,
             "-" => MathOp::Sub,
             "*" => MathOp::Mul,
             "/" => MathOp::Div,
             "^" => MathOp::Pow,
             _ => MathOp::Add,
-        }
+        })
     }
 }
 
@@ -1448,12 +1477,12 @@ pub enum MemberOp {
 }
 
 impl MemberOp {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
-        match entry.as_str() {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        Ok(match entry.as_str() {
             "in" => MemberOp::In,
             "not in" | "!in" => MemberOp::NotIn,
-            _ => unreachable!("Unexpected member_op: {}", entry.as_str()),
-        }
+            _ => bail!("Unexpected member_op: {}", entry.as_str()),
+        })
     }
 }
 
@@ -1474,12 +1503,12 @@ pub enum SubsetOp {
 }
 
 impl SubsetOp {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
-        match entry.as_str() {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        Ok(match entry.as_str() {
             "within" => SubsetOp::Within,
             "not within" | "!within" => SubsetOp::NotWithin,
-            _ => unreachable!("Unexpected subset_op: {}", entry.as_str()),
-        }
+            _ => bail!("Unexpected subset_op: {}", entry.as_str()),
+        })
     }
 }
 
@@ -1500,12 +1529,12 @@ pub enum BoolOp {
 }
 
 impl BoolOp {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
-        match entry.as_str() {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        Ok(match entry.as_str() {
             "and" | "&&" => BoolOp::And,
             "or" | "||" => BoolOp::Or,
             _ => BoolOp::And,
-        }
+        })
     }
 }
 
@@ -1526,22 +1555,22 @@ pub struct VarSubscripted {
 }
 
 impl VarSubscripted {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut var: Option<Spur> = None;
         let mut subscript = Subscript::default();
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::var_ref => var = Some(intern(pair.as_str())),
-                Rule::subscript => subscript = Subscript::from_entry(pair),
+                Rule::subscript => subscript = Subscript::from_entry(pair)?,
                 _ => {}
             }
         }
 
-        Self {
-            var: var.unwrap(),
+        Ok(Self {
+            var: var.context("missing var ref")?,
             subscript,
-        }
+        })
     }
 }
 
@@ -1578,35 +1607,37 @@ impl From<Vec<SetVal>> for SetVals {
 pub type Index = SmallVec<[SetVal; 6]>;
 
 /// Parse set_vals or set_tuples directly into SetVals
-fn parse_set_vals_or_tuples(pair: Pair<Rule>) -> SetVals {
+fn parse_set_vals_or_tuples(pair: Pair<Rule>) -> Result<SetVals> {
     let mut values = Vec::new();
 
     match pair.as_rule() {
-        Rule::set_vals => {
+        Rule::set_vals | Rule::set_vals_data => {
             for val in pair.into_inner() {
-                if val.as_rule() == Rule::set_val {
-                    values.push(SetVal::from_entry(val));
+                if matches!(val.as_rule(), Rule::set_val | Rule::set_val_data) {
+                    values.push(SetVal::from_entry(val)?);
                 }
             }
         }
-        Rule::set_tuples => {
+        Rule::set_tuples | Rule::set_tuples_data => {
             for tuple in pair.into_inner() {
-                if tuple.as_rule() == Rule::set_tuple {
+                if matches!(tuple.as_rule(), Rule::set_tuple | Rule::set_tuple_data) {
                     let tuple_vals: Vec<SetValTerminal> = tuple
                         .into_inner()
-                        .filter(|p| p.as_rule() == Rule::set_val)
-                        .map(|p| {
-                            let inner = p.into_inner().next().unwrap();
-                            match inner.as_rule() {
-                                Rule::id => SetValTerminal::Str(intern(inner.as_str())),
+                        .filter(|p| matches!(p.as_rule(), Rule::set_val | Rule::set_val_data))
+                        .map(|p| -> Result<SetValTerminal> {
+                            let inner = p.into_inner().next().context("empty set_val")?;
+                            Ok(match inner.as_rule() {
+                                Rule::id | Rule::id_data => {
+                                    SetValTerminal::Str(intern(inner.as_str()))
+                                }
                                 Rule::int => {
                                     SetValTerminal::Int(inner.as_str().parse().unwrap_or(0))
                                 }
                                 _ => SetValTerminal::Str(intern(inner.as_str())),
-                            }
+                            })
                         })
-                        .collect();
-                    assert!(
+                        .collect::<Result<Vec<_>>>()?;
+                    ensure!(
                         tuple_vals.len() == 2,
                         "Only 2-element tuples supported, got {}",
                         tuple_vals.len()
@@ -1618,34 +1649,40 @@ fn parse_set_vals_or_tuples(pair: Pair<Rule>) -> SetVals {
         _ => {}
     }
 
-    SetVals(values)
+    Ok(SetVals(values))
 }
 
 /// Parse set_assign (`:= ...`) into SetVals (used by SetData in data section)
-fn parse_set_assign(pair: Pair<Rule>) -> SetVals {
+fn parse_set_assign(pair: Pair<Rule>) -> Result<SetVals> {
     match pair.into_inner().next() {
         Some(inner) => parse_set_vals_or_tuples(inner),
-        None => SetVals(vec![]),
+        None => Ok(SetVals(vec![])),
     }
 }
 
 /// Parse param_data_body into ParamDataBody (reused by Param and ParamData)
-fn parse_param_data_body(pair: Pair<Rule>) -> ParamDataBody {
+fn parse_param_data_body(pair: Pair<Rule>) -> Result<ParamDataBody> {
     let mut inner_pairs = pair.into_inner();
-    let first = inner_pairs.next().unwrap();
+    let first = inner_pairs.next().context("empty param_data_body")?;
 
-    match first.as_rule() {
+    Ok(match first.as_rule() {
         Rule::param_data_list => {
-            let pairs = first.into_inner().map(ParamDataPair::from_entry).collect();
+            let pairs: Vec<_> = first
+                .into_inner()
+                .map(ParamDataPair::from_entry)
+                .collect::<Result<_>>()?;
             ParamDataBody::List(pairs)
         }
         Rule::param_data_matrix => {
-            let mut tables = vec![ParamDataTable::from_entry(first)];
-            tables.extend(inner_pairs.map(ParamDataTable::from_entry));
+            let mut tables = vec![ParamDataTable::from_entry(first)?];
+            let rest: Vec<_> = inner_pairs
+                .map(ParamDataTable::from_entry)
+                .collect::<Result<_>>()?;
+            tables.extend(rest);
             ParamDataBody::Tables(tables)
         }
         Rule::param_data_scalar => {
-            let num: f64 = first.as_str().parse().unwrap();
+            let num: f64 = first.as_str().parse()?;
             ParamDataBody::Num(num)
         }
         Rule::param_data_symbolic => {
@@ -1653,8 +1690,8 @@ fn parse_param_data_body(pair: Pair<Rule>) -> ParamDataBody {
             let unquoted = s[1..s.len() - 1].to_string();
             ParamDataBody::Symbolic(unquoted)
         }
-        _ => unreachable!(),
-    }
+        _ => bail!("unexpected rule in param_data_body: {:?}", first.as_rule()),
+    })
 }
 
 /// Subscript (array indexing with optional shifts)
@@ -1662,13 +1699,13 @@ fn parse_param_data_body(pair: Pair<Rule>) -> ParamDataBody {
 pub struct Subscript(pub Vec<SubscriptPart>);
 
 impl Subscript {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let parts = entry
             .into_inner()
             .filter(|p| p.as_rule() == Rule::subscript_part)
             .map(SubscriptPart::from_entry)
-            .collect();
-        Self(parts)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self(parts))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1687,19 +1724,19 @@ pub struct SubscriptPart {
 }
 
 impl SubscriptPart {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut var = intern("");
         let mut shift = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::id | Rule::int => var = intern(pair.as_str()),
-                Rule::subscript_shift => shift = Some(SubscriptShift::from_entry(pair)),
+                Rule::subscript_shift => shift = Some(SubscriptShift::from_entry(pair)?),
                 _ => {}
             }
         }
 
-        Self { var, shift }
+        Ok(Self { var, shift })
     }
 }
 
@@ -1721,13 +1758,13 @@ pub enum SubscriptShift {
 }
 
 impl SubscriptShift {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let s = entry.as_str();
-        if s.starts_with('+') {
+        Ok(if s.starts_with('+') {
             SubscriptShift::Plus
         } else {
             SubscriptShift::Minus
-        }
+        })
     }
 }
 
@@ -1761,23 +1798,23 @@ pub struct FuncMin {
 }
 
 impl FuncMin {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut domain = None;
         let mut var: Option<Spur> = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::domain => domain = Some(Domain::from_entry(pair)),
+                Rule::domain => domain = Some(Domain::from_entry(pair)?),
                 Rule::func_var => var = Some(intern(pair.as_str())),
                 _ => {}
             }
         }
-        let domain = domain.unwrap();
+        let domain = domain.context("missing func_min domain")?;
 
-        Self {
+        Ok(Self {
             domain,
-            var: var.unwrap(),
-        }
+            var: var.context("missing func_min var")?,
+        })
     }
 }
 
@@ -1795,23 +1832,23 @@ pub struct FuncMax {
 }
 
 impl FuncMax {
-    pub fn from_entry(entry: Pair<Rule>) -> Self {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut domain = None;
         let mut var: Option<Spur> = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::domain => domain = Some(Domain::from_entry(pair)),
+                Rule::domain => domain = Some(Domain::from_entry(pair)?),
                 Rule::func_var => var = Some(intern(pair.as_str())),
                 _ => {}
             }
         }
-        let domain = domain.unwrap();
+        let domain = domain.context("missing func_max domain")?;
 
-        Self {
+        Ok(Self {
             domain,
-            var: var.unwrap(),
-        }
+            var: var.context("missing func_max var")?,
+        })
     }
 }
 

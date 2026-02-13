@@ -27,7 +27,7 @@ pub fn load_model(path: &str) -> Result<Vec<Entry>> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("Cannot read file: {path}"))?;
     let pairs = loader::parse(&text)?;
-    Ok(loader::consume(pairs))
+    loader::consume(pairs)
 }
 
 /// Loads the GMPL data file at `path` into an internal representation
@@ -38,7 +38,7 @@ pub fn load_data(path: &str) -> Result<Vec<Entry>> {
     // But GMPL allows it to be omitted from a .dat file, so insert it to be safe
     let prefixed = format!("data;\n{text}");
     let pairs = loader::parse(&prefixed)?;
-    Ok(loader::consume(pairs))
+    loader::consume(pairs)
 }
 
 /// Load model and data, calling `load_model` and `load_data`.

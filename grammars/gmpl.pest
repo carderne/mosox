@@ -57,11 +57,17 @@ SET             =  { "set" ~ name ~ alias? ~ domain? ~ (","? ~ set_attrib)* ~ ";
 set_attrib      =  { set_dimen | set_within | set_assign | set_default }
 set_dimen       =  { "dimen" ~ int }
 set_assign      =  { ":=" ~ (set_expr | set_vals | set_tuples) }
+
 set_default     =  { "default" ~ ( set_expr | set_vals | set_tuples) }
 set_expr        =  { domain | set_inter | set_setof | set_ref }
 set_ref         =  { id ~ index? }
 set_inter       =  { var_subscripted ~ ("inter" ~ var_subscripted)+ }
 set_setof       =  { "setof" ~ domain ~ domain_var }
+
+set_tuples       = { set_tuple+ }
+set_tuple        = { "(" ~ set_val ~ ("," ~ set_val)+ ~ ")" }
+set_vals         = { (","? ~ set_val)+ }
+set_val          = { id | int }
 
 // unlike `domain`, this doesn't allow a condition, and the "f in" part is optional
 set_within      =  { "within" ~ within_set ~ ("cross" ~ cross_set)? }
@@ -118,17 +124,18 @@ data_entry = _{
 }
 
 // Data: Set
-SET_DATA         = { "set" ~ id ~ index? ~ set_data_assign? ~ ";" }
-set_data_assign  = { ":=" ~ (set_vals | set_tuples)? }
-set_tuples       = { set_tuple+ }
-set_tuple        = { "(" ~ set_val ~ ("," ~ set_val)+ ~ ")" }
-set_vals         = { (","? ~ set_val)+ }
-set_val          = { id | int }
+SET_DATA         = { "set" ~ id ~ index? ~ set_assign_data? ~ ";" }
+set_assign_data  = { ":=" ~ (set_vals_data | set_tuples_data)? }
+set_tuples_data  = { set_tuple_data+ }
+set_tuple_data   = { "(" ~ set_val_data ~ ("," ~ set_val_data)+ ~ ")" }
+set_vals_data    = { (","? ~ set_val_data)+ }
+set_val_data     = { id_data | int }
 
 // Index
 // Whereas a subscript is symbolic, an "index" is made up of concrete values
 // from a given set.
-index  =  { "[" ~ set_val ~ ("," ~ set_val)* ~ "]" }
+index       =  { "[" ~ set_val ~ ("," ~ set_val)* ~ "]" }
+index_data  =  { "[" ~ set_val_data ~ ("," ~ set_val_data)* ~ "]" }
 
 // Data: Param
 PARAM_DATA          =  {
@@ -139,13 +146,13 @@ param_data_body =      { param_data_symbolic | param_data_matrix+ | param_data_l
 param_data_symbolic = @{ string_literal }
 param_data_scalar   = @{ number }
 param_data_list     =  { param_data_pair+ }
-param_data_pair     =  { set_val ~ number ~ ","? }
+param_data_pair     =  { set_val_data ~ number ~ ","? }
 param_data_matrix   =  { param_data_target? ~ ":" ~ param_data_cols ~ ":="? ~ param_data_row+ }
-param_data_cols     =  { set_val+ }
-param_data_row      = ${ set_val ~ param_data_row_vals }
+param_data_cols     =  { set_val_data+ }
+param_data_row      = ${ set_val_data ~ param_data_row_vals }
 param_data_row_vals = ${ ((" " | "\t")+ ~ param_data_val)+ }
 param_data_val      = @{ number }
-param_data_target   =  { "[" ~ (set_val | param_data_any) ~ ("," ~ (set_val | param_data_any))* ~ "]" }
+param_data_target   =  { "[" ~ (set_val_data | param_data_any) ~ ("," ~ (set_val_data | param_data_any))* ~ "]" }
 param_data_any      =  { "*" }
 
 // //////////////////////
@@ -220,6 +227,8 @@ subset_op        =  { "within" | "not within" | "!within" }
 // Primitives
 name       = @{ id }
 id         = @{ !reserved ~ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+// rules are much looser for values in the data section
+id_data    = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
 int        = @{ ASCII_DIGIT+ }
 
 // Reserved

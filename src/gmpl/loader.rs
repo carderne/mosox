@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use pest::Parser;
 use pest::error::LineColLocation;
 use pest::iterators::Pairs;
@@ -25,18 +25,18 @@ pub fn parse(data: &str) -> Result<Pairs<'_, Rule>> {
 }
 
 /// Convert the AST Pest Pairs into a IR
-pub fn consume(entries: Pairs<'_, Rule>) -> Vec<Entry> {
-    entries
-        .into_iter()
-        .filter_map(|entry| match entry.as_rule() {
-            Rule::VAR => Some(Entry::Var(ir::Var::from_entry(entry))),
-            Rule::PARAM => Some(Entry::Param(ir::Param::from_entry(entry))),
-            Rule::SET => Some(Entry::Set(Box::new(ir::Set::from_entry(entry)))),
-            Rule::OBJECTIVE => Some(Entry::Objective(ir::Objective::from_entry(entry))),
-            Rule::CONSTRAINT => Some(Entry::Constraint(ir::Constraint::from_entry(entry))),
-            Rule::SET_DATA => Some(Entry::DataSet(ir::SetData::from_entry(entry))),
-            Rule::PARAM_DATA => Some(Entry::DataParam(ir::ParamData::from_entry(entry))),
-            Rule::CHECK => Some(Entry::Check(ir::Check::from_entry(entry))),
+pub fn consume(entries: Pairs<'_, Rule>) -> Result<Vec<Entry>> {
+    let mut result = Vec::new();
+    for entry in entries {
+        match entry.as_rule() {
+            Rule::VAR => result.push(Entry::Var(ir::Var::from_entry(entry)?)),
+            Rule::PARAM => result.push(Entry::Param(ir::Param::from_entry(entry)?)),
+            Rule::SET => result.push(Entry::Set(Box::new(ir::Set::from_entry(entry)?))),
+            Rule::OBJECTIVE => result.push(Entry::Objective(ir::Objective::from_entry(entry)?)),
+            Rule::CONSTRAINT => result.push(Entry::Constraint(ir::Constraint::from_entry(entry)?)),
+            Rule::SET_DATA => result.push(Entry::DataSet(ir::SetData::from_entry(entry)?)),
+            Rule::PARAM_DATA => result.push(Entry::DataParam(ir::ParamData::from_entry(entry)?)),
+            Rule::CHECK => result.push(Entry::Check(ir::Check::from_entry(entry)?)),
             Rule::END
             | Rule::EOI
             | Rule::PRINT
@@ -44,17 +44,18 @@ pub fn consume(entries: Pairs<'_, Rule>) -> Vec<Entry> {
             | Rule::SOLVE
             | Rule::FOR
             | Rule::TABLE
-            | Rule::COMMENT => None,
+            | Rule::COMMENT => {}
             _ => {
                 let (line, _) = entry.line_col();
-                unreachable!(
+                bail!(
                     "unexpected: {line} rule: {:?}\ntext: {}",
                     entry.as_rule(),
                     entry.as_str()
                 );
             }
-        })
-        .collect()
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -82,6 +83,6 @@ mod tests {
             param DiscountRate{r in REGION};
         "#;
         let entries = parse(&text).unwrap();
-        consume(entries);
+        consume(entries).unwrap();
     }
 }
