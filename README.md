@@ -146,46 +146,30 @@ This list of limitations is made with reference to the GNU MathProg Language Ref
 It is intended that all of these will ultimately be supported, and most of them are "trivial" to add.
 
 ### Functions
-Not yet implemented:
 - The following functions: `abs`, `atan`, `card`, `ceil`, `cos`, `exp`, `floor`, `gmtime`, `length`, `log`, `prod`, `round`, `sin`, `sqrt`, `str2time`, `trunc`, `Irand224`, `Uniform`, `Normal`.
 
 ### Expressions
-Not yet implemented:
-- These arithmetic operators: `less` (positive difference operator), `div` (quotient), `mod`
+- These arithmetic operators: `less`, `div`, `mod`
 - These symbolic operators: `&` (string concatenation)
 - These set expressions: "arithmetic" set, conditional set expressions, parenthesized set expressions
 - These set operators: `union`, `diff`, `symdiff`.
-- These logical expressions: iterated expressions (`forall`, `exists`)
+- These logical iterated expressions: `forall`, `exists`
 - These logical operators: `not`
 
 ### Sets
-Not yet supported:
 - Elements larger than two-tuple.
-- `within` (parsed but not enforced)
+- `within` (parsed, not enforced)
 
 ### Parameters
-Not yet supported:
-- Alias
-- Relational condition (parsed but not enforced)
-- Superset expression (parsed but not enforced)
-- Type specifier (integer, binary, symbolic) (parsed but not enforced)
+- Relational condition (parsed, not enforced)
+- Superset expression (parsed, not enforced)
+- Type specifier (integer, binary, symbolic) (parsed, not enforced)
 
 ### Variables
-Not yet supported:
 - Bounds specified as expressions (currently only constant accepted)
 
 ### Constraints
-Not yet supported:
-- Alias
 - Multiple expressions (comma-separated)
 
-### Objective function
-Not yet supported:
-- Alias
-
 ### Other statements
-Support for these statements is not planned.
-Results should instead be parsed from the solver output.
-- Display statement
-- Printf statement
-- For statement
+Support for these statements is not planned (results should instead be parsed from the solver output): `display`, `printf`, `for`.

@@ -34,7 +34,7 @@ model_entry = _{
 
 // Variable
 // Example: var Demand >= 0;
-VAR        = { "var" ~ name ~ domain? ~ (","? ~ var_attrib)* ~ ";" }
+VAR        = { "var" ~ name ~ alias? ~ domain? ~ (","? ~ var_attrib)* ~ ";" }
 var_attrib = { var_bounds | var_type }
 var_bounds = { rel_op ~ number }
 var_type      =  { "integer" | "binary" }
@@ -42,7 +42,7 @@ var_type      =  { "integer" | "binary" }
 // Parameter
 // The comma separator seems to be optional
 // Example: param Discount{r in REGION} := (1 + DiscountRate[r])
-PARAM           =  { "param" ~ name ~ domain? ~ (","? ~ param_attrib)* ~ param_assign? ~ ";" }
+PARAM           =  { "param" ~ name ~ alias? ~ domain? ~ (","? ~ param_attrib)* ~ param_assign? ~ ";" }
 param_attrib    = _{ param_type | param_condition | param_in | param_default }
 param_type      =  { "integer" | "binary" | "symbolic" }
 param_condition =  { rel_op ~ expr }
@@ -53,7 +53,7 @@ param_default   =  { "default" ~ (expr | string_literal) }
 
 // Set
 // Example: set DAILYTIMEBRACKET;
-SET             =  { "set" ~ id ~ domain? ~ (","? ~ set_attrib)* ~ ";" }
+SET             =  { "set" ~ name ~ alias? ~ domain? ~ (","? ~ set_attrib)* ~ ";" }
 set_attrib      =  { set_dimen | set_within | set_assign | set_default }
 set_dimen       =  { "dimen" ~ int }
 set_assign      =  { ":=" ~ (set_expr | set_vals | set_tuples) }
@@ -72,15 +72,17 @@ cross_set       = @{ id }
 // Example: s.t. Capacity{r in REGION}: NewCap[r] = 2
 // Apparently multiple expressions are supported?
 // Osemosys doesn't use this
-CONSTRAINT      =  { constraint_kw ~ name ~ domain? ~ ":" ~ constraint_expr ~ ";" }
+CONSTRAINT      =  { constraint_kw? ~ name ~ alias? ~ domain? ~ ":" ~ constraint_expr ~ ";" }
 constraint_expr =  { expr ~ rel_op ~ expr }
-constraint_kw   = _{ "subject to" | "subj to" | "s.t." } // can be omitted
+constraint_kw   = _{ "subject to" | "subj to" | "s.t." }
 
 // Objective
 // Example: minimize cost: sum{y in YEAR} Cost[y];
-OBJECTIVE = { obj_sense ~ id ~ ":" ~ expr ~ ";" }
+OBJECTIVE = { obj_sense ~ name ~ alias? ~ ":" ~ expr ~ ";" }
 obj_sense = { "maximize" | "minimize" }
 
+// Check
+CHECK =  { "check" ~ domain? ~ ":"? ~ logic_expr  ~ ";" }
 
 // For (ignored)
 FOR       = { "for" ~ domain ~ "{" ~ for_inner* ~ "}" }
@@ -89,9 +91,6 @@ for_inner = { FOR | PRINT }
 // Print (ignored)
 PRINT   = @{ "printf" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
 DISPLAY = @{ "display" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
-
-// Check (ignored)
-CHECK =  { "check" ~ domain? ~ ":"? ~ logic_expr  ~ ";" }
 
 // Solve (ignored)
 SOLVE = { "solve" ~ ";" }
@@ -220,8 +219,16 @@ subset_op        =  { "within" | "not within" | "!within" }
 
 // Primitives
 name       = @{ id }
-id         = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+id         = @{ !reserved ~ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
 int        = @{ ASCII_DIGIT+ }
+
+// Reserved
+reserved = @{ ( "and" | "by" | "cross" | "diff" | "div" | "else" | "if"
+              | "in" | "inter" | "less" | "mod" | "not" | "or" | "symdiff"
+              | "then" | "union" | "within"
+              | "check" | "set" | "var" | "param" | "maximize" | "minimize"
+              | "table" | "solve" | "display" | "printf" | "for" | "end"
+              ) ~ !( ASCII_ALPHANUMERIC | "_" ) }
 
 // float1 and float2 is to handle all of: 1.2, 1., .2
 // (Just doing DIGIT* "."? DIGIT* captures anything so doesn't work
@@ -231,6 +238,7 @@ float2     = @{ "." ~ ASCII_DIGIT+ }
 exponent   = @{ ("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+ }
 
 // String literal
+alias          = @{ string_literal }
 string_literal =  { single_quoted | double_quoted }
 single_quoted  = _{ "'" ~ single_char* ~ "'" }
 single_char    = _{ "''" | (!"'" ~ ANY) }

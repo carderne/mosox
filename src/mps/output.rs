@@ -92,12 +92,10 @@ fn write_var_bounds(w: &mut impl Write, vars: &VarsMap) {
                     if lower != 0.0 {
                         if lower == f64::NEG_INFINITY {
                             writeln!(w, " MI BND1 {var_name}{idx_str}").unwrap();
+                        } else if var_type == VarType::Float {
+                            writeln!(w, " LO BND1 {var_name}{idx_str} {lower}").unwrap();
                         } else {
-                            if var_type == VarType::Float {
-                                writeln!(w, " LO BND1 {var_name}{idx_str} {lower}").unwrap();
-                            } else {
-                                writeln!(w, " LI BND1 {var_name}{idx_str} {lower}").unwrap();
-                            }
+                            writeln!(w, " LI BND1 {var_name}{idx_str} {lower}").unwrap();
                         }
                     }
 

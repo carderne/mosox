@@ -224,7 +224,7 @@ impl Set {
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::id => name = Some(intern(pair.as_str())),
+                Rule::name => name = Some(intern(pair.as_str())),
                 Rule::domain => domain = Domain::from_entry(pair),
                 Rule::set_attrib => {
                     let inner = pair.into_inner().next().unwrap();
@@ -413,7 +413,7 @@ impl Objective {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::obj_sense => sense = ObjSense::from_entry(pair),
-                Rule::id => name = Some(intern(pair.as_str())),
+                Rule::name => name = Some(intern(pair.as_str())),
                 Rule::expr => expr = Some(Expr::from_entry(pair)),
                 _ => {}
             }
