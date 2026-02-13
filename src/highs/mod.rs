@@ -1,33 +1,17 @@
 mod bounds;
+pub mod format;
 mod output;
 
-use std::fmt::Write as _;
 use std::io::BufWriter;
 
-use clap::ValueEnum;
 use highs::{ColProblem, Row, Sense};
 use indexmap::IndexMap;
 
 use crate::{
-    highs::bounds::bounds_vec_to_range,
+    highs::{bounds::bounds_vec_to_range, format::Format, output::format_name},
     ir::{ObjSense, VarType, interner::intern_resolve, op::RowType},
     matrix::{Compiled, ConId, VarId},
 };
-
-#[derive(Clone, Debug, ValueEnum)]
-pub enum Format {
-    Txt,
-    Csv,
-}
-
-impl std::fmt::Display for Format {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Format::Txt => write!(f, "txt"),
-            Format::Csv => write!(f, "csv"),
-        }
-    }
-}
 
 pub struct SolutionRow {
     pub name: String,
@@ -42,24 +26,6 @@ pub struct SolutionData {
     pub variables: Vec<SolutionRow>,
 }
 
-fn format_name(spur: lasso::Spur, idx: &crate::ir::Index) -> String {
-    let name = intern_resolve(spur);
-    let mut s = name.to_string();
-    if !idx.is_empty() {
-        s.push('[');
-        let mut first = true;
-        for item in idx.iter() {
-            if !first {
-                s.push(',');
-            }
-            first = false;
-            write!(s, "{item}").unwrap();
-        }
-        s.push(']');
-    }
-    s
-}
-
 pub fn highs_solve(compiled: Compiled, format: Format) {
     let stdout = std::io::stdout();
     let mut w = BufWriter::with_capacity(256 * 1024, stdout.lock());
@@ -70,10 +36,15 @@ pub fn highs_solve(compiled: Compiled, format: Format) {
     let mut rows: IndexMap<ConId, Row> = IndexMap::new();
     let mut cols: Vec<VarId> = vec![];
     let mut objective: Option<ConId> = None;
+    let mut obj_offset: Option<f64> = None;
 
     for (con_id, row_type, rhs) in cons {
         if row_type == RowType::Unconstrained {
+            // The only way we tell which function is the objective is that it is unconstrained...
+            // Seems like this should be a bit more robust
             objective = Some(con_id);
+
+            obj_offset = Some(rhs);
         } else {
             let range = row_type.to_range(rhs);
             let row = pb.add_row(range);
@@ -82,6 +53,11 @@ pub fn highs_solve(compiled: Compiled, format: Format) {
     }
 
     let objective = objective.expect("no objective function founds");
+    let obj_offset = obj_offset.expect("no objective function rhs found");
+
+    // HiGHS doesn't support adding the constant part of the objective function to the equation.
+    // So we store the value above and add it as a negated constant variable
+    pb.add_column(-obj_offset, 1.0..=1.0, &[]);
 
     for (var_id, con_map) in vars {
         let range = bounds_vec_to_range(con_map.bounds);

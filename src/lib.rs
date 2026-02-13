@@ -15,7 +15,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 
 use crate::gmpl::loader;
-pub use crate::highs::Format;
+pub use crate::highs::format::Format;
 use crate::highs::highs_solve;
 use crate::ir::Entry;
 use crate::ir::model::ModelWithData;

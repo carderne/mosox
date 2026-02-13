@@ -1,6 +1,27 @@
+use std::fmt::Write as _;
 use std::io::Write;
 
+use crate::ir::interner::intern_resolve;
+
 use super::SolutionData;
+
+pub fn format_name(spur: lasso::Spur, idx: &crate::ir::Index) -> String {
+    let name = intern_resolve(spur);
+    let mut s = name.to_string();
+    if !idx.is_empty() {
+        s.push('[');
+        let mut first = true;
+        for item in idx.iter() {
+            if !first {
+                s.push(',');
+            }
+            first = false;
+            write!(s, "{item}").unwrap();
+        }
+        s.push(']');
+    }
+    s
+}
 
 pub fn write_txt(w: &mut impl Write, data: &SolutionData) {
     let _ = writeln!(w, "OBJECTIVE VALUE\n{:.3}", data.objective_value);
