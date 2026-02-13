@@ -5,48 +5,57 @@ use std::fmt;
 
 use crate::ir::{self, RelOp};
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Bounds {
-    Free,
-    Lower(f64),
-    Upper(f64),
     Fixed(f64),
+    Range(f64, f64),
 }
 
 impl Bounds {
-    pub fn from_gmpl_bounds(bounds: Vec<ir::VarBounds>) -> Vec<Self> {
-        bounds
-            .into_iter()
-            .map(|bound| match bound.op {
-                ir::RelOp::Lt => panic!("Less than not supported"),
-                ir::RelOp::Le => Self::Upper(bound.value),
-                ir::RelOp::Eq => Self::Fixed(bound.value),
-                ir::RelOp::EqEq => Self::Fixed(bound.value),
-                ir::RelOp::Ne => panic!("Not equal not supported"),
-                ir::RelOp::Ne2 => panic!("Not equal not supported"),
-                ir::RelOp::Ge => Self::Lower(bound.value),
-                ir::RelOp::Gt => panic!("Greater than not supported"),
-            })
-            .collect()
+    pub fn from_gmpl_bounds(bounds: Vec<ir::VarBounds>) -> Self {
+        if bounds.is_empty() {
+            return Self::Range(f64::NEG_INFINITY, f64::INFINITY);
+        };
+
+        let mut lower: Option<f64> = None;
+        let mut upper: Option<f64> = None;
+        let mut fixed: Option<f64> = None;
+
+        bounds.into_iter().for_each(|bound| match bound.op {
+            ir::RelOp::Lt => panic!("Less than not supported"),
+            ir::RelOp::Le => {
+                upper = Some(bound.value);
+            }
+            ir::RelOp::Eq => {
+                fixed = Some(bound.value);
+            }
+            ir::RelOp::EqEq => {
+                fixed = Some(bound.value);
+            }
+            ir::RelOp::Ne => panic!("Not equal not supported"),
+            ir::RelOp::Ne2 => panic!("Not equal not supported"),
+            ir::RelOp::Ge => {
+                lower = Some(bound.value);
+            }
+            ir::RelOp::Gt => panic!("Greater than not supported"),
+        });
+
+        if let Some(fixed) = fixed {
+            if lower.is_some() || upper.is_some() {
+                panic!("Cannot specify fixed and inequality var bounds");
+            };
+            Self::Fixed(fixed)
+        } else {
+            let lower = lower.unwrap_or(f64::NEG_INFINITY);
+            let upper = upper.unwrap_or(f64::INFINITY);
+            Self::Range(lower, upper)
+        }
     }
 
     pub fn to_range(self) -> std::ops::RangeInclusive<f64> {
         match self {
-            Self::Free => f64::NEG_INFINITY..=f64::INFINITY,
-            Self::Lower(v) => v..=f64::INFINITY,
-            Self::Upper(v) => f64::NEG_INFINITY..=v,
+            Self::Range(lower, upper) => lower..=upper,
             Self::Fixed(v) => v..=v,
-        }
-    }
-}
-
-impl fmt::Display for Bounds {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Free => write!(f, "FR"),
-            Self::Lower(_) => write!(f, "LO"),
-            Self::Upper(_) => write!(f, "UP"),
-            Self::Fixed(_) => write!(f, "FX"),
         }
     }
 }

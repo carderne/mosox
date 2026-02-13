@@ -3,7 +3,6 @@ pub(crate) mod model;
 pub(crate) mod op;
 
 use std::fmt;
-use std::io::Write;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
@@ -1577,22 +1576,6 @@ impl From<Vec<SetVal>> for SetVals {
 
 /// Index
 pub type Index = SmallVec<[SetVal; 6]>;
-
-#[inline]
-pub fn write_index_vals(w: &mut impl Write, v: &Index) {
-    if !v.is_empty() {
-        write!(w, "[").unwrap();
-        let mut first = true;
-        for item in v.iter() {
-            if !first {
-                write!(w, ",").unwrap();
-            }
-            first = false;
-            write!(w, "{item}").unwrap();
-        }
-        write!(w, "]").unwrap();
-    }
-}
 
 /// Parse set_vals or set_tuples directly into SetVals
 fn parse_set_vals_or_tuples(pair: Pair<Rule>) -> SetVals {

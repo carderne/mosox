@@ -24,7 +24,7 @@ pub type VarId = (Spur, Arc<Index>);
 
 pub struct VarWithCoefficients {
     pub var_type: VarType,
-    pub bounds: Vec<Bounds>,
+    pub bounds: Bounds,
     /// coeffs is a map of (constraint_name, constraint_index) -> coefficient
     pub coeffs: IndexMap<ConId, f64>,
 }
@@ -78,7 +78,7 @@ fn build_cols_and_rows(
                     let v = lookups.var_map.get(&pair.var).unwrap();
                     VarWithCoefficients {
                         var_type: v.var_type,
-                        bounds: v.bounds.clone(),
+                        bounds: v.bounds,
                         coeffs: IndexMap::new(),
                     }
                 })

@@ -17,7 +17,7 @@ use crate::{
 
 pub struct VarCont {
     pub var_type: VarType,
-    pub bounds: Vec<Bounds>,
+    pub bounds: Bounds,
 }
 
 pub struct Lookups {

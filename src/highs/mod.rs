@@ -1,4 +1,3 @@
-mod bounds;
 pub mod format;
 mod output;
 
@@ -8,8 +7,8 @@ use highs::{ColProblem, Row, Sense};
 use indexmap::IndexMap;
 
 use crate::{
-    highs::{bounds::bounds_vec_to_range, format::Format, output::format_name},
-    ir::{ObjSense, VarType, interner::intern_resolve, op::RowType},
+    highs::{format::Format, output::format_name},
+    ir::{ObjSense, VarType, op::RowType},
     matrix::{Compiled, ConId, VarId},
 };
 
@@ -57,17 +56,11 @@ pub fn highs_solve(compiled: Compiled, format: Format) {
 
     // HiGHS doesn't support adding the constant part of the objective function to the equation.
     // So we store the value above and add it as a negated constant variable
+    #[allow(clippy::needless_borrows_for_generic_args)]
     pb.add_column(-obj_offset, 1.0..=1.0, &[]);
 
     for (var_id, con_map) in vars {
-        let range = bounds_vec_to_range(con_map.bounds);
-        let range = match range {
-            Err(e) => {
-                let var_name = intern_resolve(var_id.0);
-                panic!("Failed to parse {var_name}: {e}");
-            }
-            Ok(r) => r,
-        };
+        let range = con_map.bounds.to_range();
         let mut row_factors: Vec<(Row, f64)> = vec![];
 
         let mut col_factor: f64 = 0.;
