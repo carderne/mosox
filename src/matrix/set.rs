@@ -6,7 +6,7 @@ use crate::{
         SetVals, SetValue, model::SetWithData,
     },
     matrix::{
-        constraint::{IdxValMap, domain_to_indexes, get_index_map, idx_get},
+        constraint::{IdxValMap, domain_to_indexes, get_index_map, idx_get, idx_val_or_get},
         lookup::Lookups,
     },
 };
@@ -92,7 +92,7 @@ pub fn resolve_set_expr(expr: &SetExpr, idx_val_map: &IdxValMap, lookups: &Looku
                     let index_concrete: Index = v
                         .subscript
                         .iter()
-                        .map(|i| *idx_get(idx_val_map, i.var).unwrap())
+                        .map(|i| idx_val_or_get(idx_val_map, i.var))
                         .collect::<Vec<_>>()
                         .into();
                     lookups

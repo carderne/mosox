@@ -185,7 +185,7 @@ logic_compound =  { "(" ~ logic_expr ~ ")" }
 var_subscripted =  { var_ref ~ subscript? }
 var_ref         = @{ id }
 subscript       =  { "[" ~ subscript_part ~ ("," ~ subscript_part)* ~ "]" }
-subscript_part  =  { (id | int) ~ subscript_shift? }
+subscript_part  =  { (id | int | string_literal) ~ subscript_shift? }
 subscript_shift =  { ("+" | "-") ~ "1" }
 
 // Expression

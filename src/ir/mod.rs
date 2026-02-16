@@ -1717,20 +1717,26 @@ impl Subscript {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SubscriptPart {
-    pub var: Spur,
+    pub var: SubscriptPartVar,
     pub shift: Option<SubscriptShift>,
 }
 
 impl SubscriptPart {
     pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
-        let mut var = intern("");
+        let mut var = SubscriptPartVar::Var(intern(""));
         let mut shift = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::id | Rule::int => var = intern(pair.as_str()),
+                Rule::id => var = SubscriptPartVar::Var(intern(pair.as_str())),
+                Rule::int => var = SubscriptPartVar::ValInt(pair.as_str().parse().unwrap()),
+                Rule::string_literal => {
+                    let s = pair.as_str();
+                    let s = &s[1..s.len() - 1]; // strip quotes
+                    var = SubscriptPartVar::ValStr(intern(s));
+                }
                 Rule::subscript_shift => shift = Some(SubscriptShift::from_entry(pair)?),
                 _ => {}
             }
@@ -1742,7 +1748,14 @@ impl SubscriptPart {
 
 impl fmt::Display for SubscriptPart {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", intern_resolve(self.var))?;
+        match self.var {
+            SubscriptPartVar::Var(s) | SubscriptPartVar::ValStr(s) => {
+                write!(f, "{}", intern_resolve(s))?;
+            }
+            SubscriptPartVar::ValInt(n) => {
+                write!(f, "{}", n)?;
+            }
+        }
         if let Some(shift) = &self.shift {
             write!(f, "{}", shift)?;
         }
@@ -1750,8 +1763,16 @@ impl fmt::Display for SubscriptPart {
     }
 }
 
+/// SubscriptPartVar (value or reference)
+#[derive(Clone, Copy, Debug)]
+pub enum SubscriptPartVar {
+    Var(Spur),    // a variable from a domain, like i, j
+    ValStr(Spur), // a value from a set, eg `gas`
+    ValInt(u32),  // a value from a set, eg `4`
+}
+
 /// Subscript shift (+1 or -1)
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum SubscriptShift {
     Plus,
     Minus,

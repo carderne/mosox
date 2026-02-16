@@ -2,7 +2,7 @@ use crate::ir::{
     BoolOp, Domain, DomainPart, DomainPartVar, Expr, Index, MathOp, RelOp, SetVal, SetValTerminal,
     Subscript, SubscriptShift, interner::intern_resolve,
 };
-use crate::ir::{LogicExpr, MemberOp, SubsetOp};
+use crate::ir::{LogicExpr, MemberOp, SubscriptPartVar, SubsetOp};
 use crate::matrix::lookup::Lookups;
 use crate::matrix::param::ParamVal;
 use crate::matrix::set::resolve_set_expr;
@@ -32,6 +32,14 @@ pub type IdxValMap = SmallVec<[(Spur, SetVal); 8]>;
 // Helper function to get a value from IdxValMap
 pub fn idx_get(map: &IdxValMap, key: Spur) -> Option<&SetVal> {
     map.iter().find(|(k, _)| *k == key).map(|(_, v)| v)
+}
+
+pub fn idx_val_or_get(map: &IdxValMap, var: SubscriptPartVar) -> SetVal {
+    match var {
+        SubscriptPartVar::Var(var) => *idx_get(map, var).unwrap(),
+        SubscriptPartVar::ValStr(val) => SetVal::Str(val),
+        SubscriptPartVar::ValInt(val) => SetVal::Int(val),
+    }
 }
 
 // Helper to extend one IdxValMap with another
@@ -474,7 +482,7 @@ fn eval_func_minmax(
             let concrete_set_keys: Index = set_domain
                 .subscript
                 .iter()
-                .map(|k| *idx_get(idx_val_map, k.var).unwrap())
+                .map(|k| idx_val_or_get(idx_val_map, k.var))
                 .collect::<Vec<_>>()
                 .into();
             let resolved = lookups
@@ -515,19 +523,7 @@ fn concrete_index(susbcript: &Subscript, idx_val_map: &IdxValMap) -> Index {
         .map(|i| {
             // First try to look up as a domain variable
             // If not found, check if it's a literal number
-            let index_val: SetVal = match idx_get(idx_val_map, i.var) {
-                Some(val) => *val,
-                None => {
-                    // Try parsing as a literal number
-                    let var_str = intern_resolve(i.var);
-                    if let Ok(num) = var_str.parse::<u32>() {
-                        SetVal::Int(num)
-                    } else {
-                        // It's a string literal (identifier used as index value)
-                        SetVal::Str(i.var)
-                    }
-                }
-            };
+            let index_val = idx_val_or_get(idx_val_map, i.var);
             match &i.shift {
                 Some(shift) => match index_val {
                     SetVal::Str(_) => {
