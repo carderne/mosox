@@ -3,6 +3,8 @@
 
 use std::fmt;
 
+use anyhow::{Result, bail};
+
 use crate::ir::{self, RelOp};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -12,43 +14,35 @@ pub enum Bounds {
 }
 
 impl Bounds {
-    pub fn from_gmpl_bounds(bounds: Vec<ir::VarBounds>) -> Self {
+    pub fn from_gmpl_bounds(bounds: Vec<ir::VarBounds>) -> Result<Self> {
         if bounds.is_empty() {
-            return Self::Range(f64::NEG_INFINITY, f64::INFINITY);
+            return Ok(Self::Range(f64::NEG_INFINITY, f64::INFINITY));
         };
 
         let mut lower: Option<f64> = None;
         let mut upper: Option<f64> = None;
         let mut fixed: Option<f64> = None;
 
-        bounds.into_iter().for_each(|bound| match bound.op {
-            ir::RelOp::Lt => panic!("Less than not supported"),
-            ir::RelOp::Le => {
-                upper = Some(bound.value);
+        for bound in bounds {
+            match bound.op {
+                ir::RelOp::Lt => bail!("less than not supported in var bounds"),
+                ir::RelOp::Le => upper = Some(bound.value),
+                ir::RelOp::Eq | ir::RelOp::EqEq => fixed = Some(bound.value),
+                ir::RelOp::Ne | ir::RelOp::Ne2 => bail!("not equal not supported in var bounds"),
+                ir::RelOp::Ge => lower = Some(bound.value),
+                ir::RelOp::Gt => bail!("greater than not supported in var bounds"),
             }
-            ir::RelOp::Eq => {
-                fixed = Some(bound.value);
-            }
-            ir::RelOp::EqEq => {
-                fixed = Some(bound.value);
-            }
-            ir::RelOp::Ne => panic!("Not equal not supported"),
-            ir::RelOp::Ne2 => panic!("Not equal not supported"),
-            ir::RelOp::Ge => {
-                lower = Some(bound.value);
-            }
-            ir::RelOp::Gt => panic!("Greater than not supported"),
-        });
+        }
 
         if let Some(fixed) = fixed {
             if lower.is_some() || upper.is_some() {
-                panic!("Cannot specify fixed and inequality var bounds");
-            };
-            Self::Fixed(fixed)
+                bail!("cannot specify fixed and inequality var bounds");
+            }
+            Ok(Self::Fixed(fixed))
         } else {
             let lower = lower.unwrap_or(f64::NEG_INFINITY);
             let upper = upper.unwrap_or(f64::INFINITY);
-            Self::Range(lower, upper)
+            Ok(Self::Range(lower, upper))
         }
     }
 
@@ -81,16 +75,14 @@ impl fmt::Display for RowType {
 }
 
 impl RowType {
-    pub fn from_rel_op(op: &RelOp) -> Self {
+    pub fn from_rel_op(op: &RelOp) -> Result<Self> {
         match op {
-            RelOp::Lt => panic!("Less than not supported"),
-            RelOp::Le => RowType::LessThanOrEqual,
-            RelOp::Eq => RowType::Equal,
-            RelOp::EqEq => RowType::Equal,
-            RelOp::Ne => panic!("Not equal not supported"),
-            RelOp::Ne2 => panic!("Not equal not supported"),
-            RelOp::Ge => RowType::GreaterThanOrEqual,
-            RelOp::Gt => panic!("Greater than not supported"),
+            RelOp::Lt => bail!("less than not supported in constraints"),
+            RelOp::Le => Ok(RowType::LessThanOrEqual),
+            RelOp::Eq | RelOp::EqEq => Ok(RowType::Equal),
+            RelOp::Ne | RelOp::Ne2 => bail!("not equal not supported in constraints"),
+            RelOp::Ge => Ok(RowType::GreaterThanOrEqual),
+            RelOp::Gt => bail!("greater than not supported in constraints"),
         }
     }
 

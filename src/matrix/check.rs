@@ -14,14 +14,15 @@ pub fn check_checks(checks: Vec<Check>, lookups: &Lookups) -> Result<()> {
             domain,
             expr,
         } = check;
-        let (indexes, parts) = domain
-            .map(|d| (domain_to_indexes(&d, lookups, &SmallVec::new()), d.parts))
-            .unwrap_or_else(|| (vec![vec![].into()], vec![]));
+        let (indexes, parts) = match domain {
+            Some(d) => (domain_to_indexes(&d, lookups, &SmallVec::new())?, d.parts),
+            None => (vec![vec![].into()], vec![]),
+        };
 
         indexes.into_par_iter().try_for_each(|con_index| {
             let con_index = Arc::new(con_index);
-            let idx_val_map = get_index_map(&parts, &con_index);
-            if check_logic_condition(&expr, lookups, &idx_val_map) {
+            let idx_val_map = get_index_map(&parts, &con_index)?;
+            if check_logic_condition(&expr, lookups, &idx_val_map)? {
                 Ok(())
             } else {
                 Err(anyhow::anyhow!(

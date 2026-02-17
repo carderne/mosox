@@ -6,6 +6,7 @@ use crate::ir::{LogicExpr, MemberOp, SubscriptPartVar, SubsetOp};
 use crate::matrix::lookup::Lookups;
 use crate::matrix::param::ParamVal;
 use crate::matrix::set::resolve_set_expr;
+use anyhow::{Context, Result, bail};
 use itertools::Itertools;
 use lasso::Spur;
 use smallvec::SmallVec;
@@ -30,15 +31,22 @@ pub enum Term {
 pub type IdxValMap = SmallVec<[(Spur, SetVal); 8]>;
 
 // Helper function to get a value from IdxValMap
-pub fn idx_get(map: &IdxValMap, key: Spur) -> Option<&SetVal> {
-    map.iter().find(|(k, _)| *k == key).map(|(_, v)| v)
+pub fn idx_get(map: &IdxValMap, key: Spur) -> Result<SetVal> {
+    map.iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, v)| v)
+        .copied()
+        .with_context(|| {
+            let name = intern_resolve(key);
+            format!("No idx val at {name}")
+        })
 }
 
-pub fn idx_val_or_get(map: &IdxValMap, var: SubscriptPartVar) -> SetVal {
+pub fn idx_val_or_get(map: &IdxValMap, var: SubscriptPartVar) -> Result<SetVal> {
     match var {
-        SubscriptPartVar::Var(var) => *idx_get(map, var).unwrap(),
-        SubscriptPartVar::ValStr(val) => SetVal::Str(val),
-        SubscriptPartVar::ValInt(val) => SetVal::Int(val),
+        SubscriptPartVar::Var(var) => idx_get(map, var),
+        SubscriptPartVar::ValStr(val) => Ok(SetVal::Str(val)),
+        SubscriptPartVar::ValInt(val) => Ok(SetVal::Int(val)),
     }
 }
 
@@ -51,97 +59,94 @@ fn idx_extend(map: &mut IdxValMap, other: &IdxValMap) {
     }
 }
 
-pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<Term> {
+pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Result<Vec<Term>> {
     match expr {
-        Expr::Number(num) => vec![Term::Num(*num)],
+        Expr::Number(num) => Ok(vec![Term::Num(*num)]),
         Expr::VarSubscripted(var_or_param) => {
             let name = &var_or_param.var;
             // Need to convert from symbolic subscript references
             // to concrete index values
-            let index = concrete_index(&var_or_param.subscript, idx_val_map);
+            let index = concrete_index(&var_or_param.subscript, idx_val_map)?;
 
             if lookups.var_map.contains_key(name) {
-                vec![Term::Pair(Pair {
+                Ok(vec![Term::Pair(Pair {
                     coeff: 1.0,
                     index,
                     var: *name,
-                })]
+                })])
             } else if let Some(param) = lookups.par_map.get(name) {
                 match &param.data {
-                    ParamVal::Scalar(num) => vec![Term::Num(*num)],
+                    ParamVal::Scalar(num) => Ok(vec![Term::Num(*num)]),
                     ParamVal::Arr(arr) => {
                         if let Some(arr_val) = arr.get(&index) {
-                            vec![Term::Num(*arr_val)]
+                            Ok(vec![Term::Num(*arr_val)])
                         } else {
                             match &param.default {
                                 Some(expr) => recurse(expr, lookups, idx_val_map),
-                                None => panic!("tried to get uninitialized param"),
+                                None => bail!("tried to get uninitialized param"),
                             }
                         }
                     }
                     ParamVal::Expr(expr) => recurse(expr, lookups, idx_val_map),
                     ParamVal::None => match &param.default {
                         Some(expr) => recurse(expr, lookups, idx_val_map),
-                        None => panic!("tried to get uninitialized param"),
+                        None => bail!("tried to get uninitialized param"),
                     },
                     ParamVal::Symbolic => {
-                        panic!("symbolic params are not supported in constraint evaluation")
+                        bail!("symbolic params are not supported in constraint evaluation")
                     }
                 }
-            } else if let Some(index_val) = idx_get(idx_val_map, *name) {
+            } else {
                 // Use the current index value (eg y=>2014) as an actual value
                 // Mostly (only?) used in domain condition expressions
-                match index_val {
-                    SetVal::Str(val) => vec![Term::Str(*val)],
-                    SetVal::Int(num) => vec![Term::Num(*num as f64)],
-                    SetVal::Tuple(_) => panic!("tuple set not allowed in var subscript"),
-                }
-            } else {
-                let symbol = intern_resolve(var_or_param.var);
-                panic!("symbol {} does not point to a valid var or param", symbol);
+                Ok(match idx_get(idx_val_map, *name)? {
+                    SetVal::Str(val) => vec![Term::Str(val)],
+                    SetVal::Int(num) => vec![Term::Num(num as f64)],
+                    SetVal::Tuple(_) => bail!("tuple set not allowed in var subscript"),
+                })
             }
         }
         Expr::FuncSum(func) => expand_sum(&func.operand, &func.domain, lookups, idx_val_map),
         Expr::FuncMin(func) => {
-            let val = eval_func_minmax(&func.domain, true, lookups, idx_val_map);
-            vec![Term::Num(val)]
+            let val = eval_func_minmax(&func.domain, true, lookups, idx_val_map)?;
+            Ok(vec![Term::Num(val)])
         }
         Expr::FuncMax(func) => {
-            let val = eval_func_minmax(&func.domain, false, lookups, idx_val_map);
-            vec![Term::Num(val)]
+            let val = eval_func_minmax(&func.domain, false, lookups, idx_val_map)?;
+            Ok(vec![Term::Num(val)])
         }
         Expr::Conditional(conditional) => {
             let default;
-            let expr: &Expr = if check_logic_condition(&conditional.condition, lookups, idx_val_map)
-            {
-                &conditional.then_expr
-            } else if let Some(otherwise) = &conditional.else_expr {
-                otherwise
-            } else {
-                default = Box::new(Expr::Number(0.0));
-                &default
-            };
+            let expr: &Expr =
+                if check_logic_condition(&conditional.condition, lookups, idx_val_map)? {
+                    &conditional.then_expr
+                } else if let Some(otherwise) = &conditional.else_expr {
+                    otherwise
+                } else {
+                    default = Box::new(Expr::Number(0.0));
+                    &default
+                };
 
             recurse(expr, lookups, idx_val_map)
         }
         Expr::UnaryNeg(inner) => {
-            let terms = recurse(inner, lookups, idx_val_map);
+            let terms = recurse(inner, lookups, idx_val_map)?;
             negate_terms(terms)
         }
         Expr::BinOp { lhs, op, rhs } => {
-            let lhs = recurse(lhs, lookups, idx_val_map);
-            let rhs = recurse(rhs, lookups, idx_val_map);
+            let lhs = recurse(lhs, lookups, idx_val_map)?;
+            let rhs = recurse(rhs, lookups, idx_val_map)?;
 
-            let lhs_num = resolve_terms_to_num(&lhs);
-            let rhs_num = resolve_terms_to_num(&rhs);
+            let lhs_num = resolve_terms_to_num(&lhs)?;
+            let rhs_num = resolve_terms_to_num(&rhs)?;
 
             match op {
                 MathOp::Add => match (lhs_num, rhs_num) {
-                    (Some(lhs), Some(rhs)) => vec![Term::Num(lhs + rhs)],
-                    _ => lhs.into_iter().chain(rhs).collect(),
+                    (Some(lhs), Some(rhs)) => Ok(vec![Term::Num(lhs + rhs)]),
+                    _ => Ok(lhs.into_iter().chain(rhs).collect()),
                 },
                 MathOp::Sub => match (lhs_num, rhs_num) {
-                    (Some(lhs), Some(rhs)) => vec![Term::Num(lhs - rhs)],
+                    (Some(lhs), Some(rhs)) => Ok(vec![Term::Num(lhs - rhs)]),
                     (None, None) => {
                         let rhs_pairs: Vec<Pair> = rhs
                             .into_iter()
@@ -155,60 +160,60 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Vec<T
                                 coeff: -pair.coeff,
                             })
                         });
-                        lhs.into_iter().chain(rhs_pairs_neg).collect()
+                        Ok(lhs.into_iter().chain(rhs_pairs_neg).collect())
                     }
                     (None, Some(num)) => lhs
                         .into_iter()
                         .map(|p| match p {
-                            Term::Str(_) => panic!("Cannot do math on a string term"),
-                            Term::Num(inner) => Term::Num(inner - num),
-                            Term::Pair(pair) => Term::Pair(Pair {
+                            Term::Str(_) => bail!("Cannot do math on a string term"),
+                            Term::Num(inner) => Ok(Term::Num(inner - num)),
+                            Term::Pair(pair) => Ok(Term::Pair(Pair {
                                 coeff: pair.coeff - num,
                                 index: pair.index,
                                 var: pair.var,
-                            }),
+                            })),
                         })
                         .collect(),
-                    _ => panic!("no vars allowed in expr sub"),
+                    _ => bail!("no vars allowed in expr sub"),
                 },
                 MathOp::Mul => match (lhs_num, rhs_num) {
-                    (Some(lhs), Some(rhs)) => vec![Term::Num(lhs * rhs)],
+                    (Some(lhs), Some(rhs)) => Ok(vec![Term::Num(lhs * rhs)]),
                     (Some(num), None) | (None, Some(num)) => {
                         let terms = if lhs_num.is_some() { rhs } else { lhs };
                         terms
                             .into_iter()
                             .map(|p| match p {
-                                Term::Str(_) => panic!("Cannot do math on a string term"),
-                                Term::Num(inner) => Term::Num(inner * num),
-                                Term::Pair(pair) => Term::Pair(Pair {
+                                Term::Str(_) => bail!("Cannot do math on a string term"),
+                                Term::Num(inner) => Ok(Term::Num(inner * num)),
+                                Term::Pair(pair) => Ok(Term::Pair(Pair {
                                     coeff: pair.coeff * num,
                                     index: pair.index,
                                     var: pair.var,
-                                }),
+                                })),
                             })
                             .collect()
                     }
-                    _ => panic!("no vars allowed in expr mul"),
+                    _ => bail!("no vars allowed in expr mul"),
                 },
                 MathOp::Div => match (lhs_num, rhs_num) {
-                    (Some(lhs), Some(rhs)) => vec![Term::Num(lhs / rhs)],
+                    (Some(lhs), Some(rhs)) => Ok(vec![Term::Num(lhs / rhs)]),
                     (None, Some(num)) => lhs
                         .into_iter()
                         .map(|p| match p {
-                            Term::Str(_) => panic!("Cannot do math on a string term"),
-                            Term::Num(inner) => Term::Num(inner / num),
-                            Term::Pair(pair) => Term::Pair(Pair {
+                            Term::Str(_) => bail!("Cannot do math on a string term"),
+                            Term::Num(inner) => Ok(Term::Num(inner / num)),
+                            Term::Pair(pair) => Ok(Term::Pair(Pair {
                                 coeff: pair.coeff / num,
                                 index: pair.index,
                                 var: pair.var,
-                            }),
+                            })),
                         })
                         .collect(),
-                    _ => panic!("no vars allowed in expr div"),
+                    _ => bail!("no vars allowed in expr div"),
                 },
                 MathOp::Pow => match (lhs_num, rhs_num) {
-                    (Some(lhs), Some(rhs)) => vec![Term::Num(lhs.powf(rhs))],
-                    _ => panic!("no vars allowed in expr pow"),
+                    (Some(lhs), Some(rhs)) => Ok(vec![Term::Num(lhs.powf(rhs))]),
+                    _ => bail!("no vars allowed in expr pow"),
                 },
             }
         }
@@ -219,22 +224,24 @@ pub fn domain_to_indexes(
     domain: &Domain,
     lookups: &Lookups,
     idx_val_map: &IdxValMap,
-) -> Vec<Index> {
+) -> Result<Vec<Index>> {
     let Domain { parts, condition } = domain;
     let cartesian: Box<dyn Iterator<Item = Vec<SetVal>>> =
         if parts.iter().all(|part| part.subscript.is_empty()) {
             Box::new(
                 parts
                     .iter()
-                    .map(|part| {
+                    .map(|part| -> Result<Vec<SetVal>> {
                         let concrete_idx: Index = vec![].into();
-                        lookups
+                        Ok(lookups
                             .set_map
                             .get(&part.set)
                             .unwrap()
-                            .resolve(&concrete_idx, lookups)
-                            .0
+                            .resolve(&concrete_idx, lookups)?
+                            .0)
                     })
+                    .collect::<Result<Vec<_>>>()?
+                    .into_iter()
                     .multi_cartesian_product(),
             )
         } else {
@@ -250,62 +257,69 @@ pub fn domain_to_indexes(
             let mut cartesian: Box<dyn Iterator<Item = Vec<SetVal>>> =
                 Box::new(vec![vec![]].into_iter());
             for part in parts {
-                cartesian = Box::new(cartesian.flat_map(|existing| {
-                    let mut idx_map = get_index_map(parts, &existing);
-                    idx_extend(&mut idx_map, idx_val_map);
-                    let concrete_idx = concrete_index(&part.subscript, &idx_map);
+                cartesian = Box::new(
+                    cartesian
+                        .map(|existing| -> Result<Vec<Vec<SetVal>>> {
+                            let mut idx_map = get_index_map(parts, &existing)?;
+                            idx_extend(&mut idx_map, idx_val_map);
+                            let concrete_idx = concrete_index(&part.subscript, &idx_map)?;
 
-                    lookups
-                        .set_map
-                        .get(&part.set)
-                        .unwrap()
-                        .resolve(&concrete_idx, lookups)
-                        .iter()
-                        .map(|val| {
-                            let mut new_idx = existing.clone();
-                            new_idx.push(*val);
-                            new_idx
+                            Ok(lookups
+                                .set_map
+                                .get(&part.set)
+                                .unwrap()
+                                .resolve(&concrete_idx, lookups)?
+                                .iter()
+                                .map(|val| {
+                                    let mut new_idx = existing.clone();
+                                    new_idx.push(*val);
+                                    new_idx
+                                })
+                                .collect::<Vec<_>>())
                         })
-                        .collect::<Vec<_>>()
-                }));
+                        .collect::<Result<Vec<_>>>()?
+                        .into_iter()
+                        .flatten(),
+                );
             }
             cartesian
         };
 
     cartesian
-        .filter_map(|idx| {
+        .map(|idx| -> Result<Option<Index>> {
             let idx = Index::from(idx);
             match &condition {
-                None => Some(idx),
+                None => Ok(Some(idx)),
                 Some(logic) => {
-                    let mut idx_map = get_index_map(parts, &idx);
+                    let mut idx_map = get_index_map(parts, &idx)?;
                     idx_extend(&mut idx_map, idx_val_map);
-                    if check_logic_condition(logic, lookups, &idx_map) {
-                        Some(idx)
+                    if check_logic_condition(logic, lookups, &idx_map)? {
+                        Ok(Some(idx))
                     } else {
-                        None
+                        Ok(None)
                     }
                 }
             }
         })
-        .collect::<Vec<Index>>()
+        .filter_map(|r| r.transpose())
+        .collect::<Result<Vec<Index>>>()
 }
 
 pub fn check_logic_condition(
     logic: &LogicExpr,
     lookups: &Lookups,
     idx_val_map: &IdxValMap,
-) -> bool {
+) -> Result<bool> {
     match logic {
         LogicExpr::Comparison { lhs, op, rhs } => {
-            let lhs = recurse(lhs, lookups, idx_val_map);
-            let rhs = recurse(rhs, lookups, idx_val_map);
+            let lhs = recurse(lhs, lookups, idx_val_map)?;
+            let rhs = recurse(rhs, lookups, idx_val_map)?;
 
             // no algebra allowed here!
-            let lhs_num = resolve_terms_to_term(&lhs);
-            let rhs_num = resolve_terms_to_term(&rhs);
+            let lhs_num = resolve_terms_to_term(&lhs)?;
+            let rhs_num = resolve_terms_to_term(&rhs)?;
 
-            match (lhs_num, rhs_num) {
+            Ok(match (lhs_num, rhs_num) {
                 (Term::Num(lhs), Term::Num(rhs)) => match op {
                     RelOp::Eq => lhs == rhs,
                     RelOp::EqEq => lhs == rhs,
@@ -319,33 +333,33 @@ pub fn check_logic_condition(
                 (Term::Str(lhs), Term::Str(rhs)) => match op {
                     RelOp::Eq => lhs == rhs,
                     RelOp::Ne => lhs != rhs,
-                    _ => panic!("unhandled logic expr: {}", logic),
+                    _ => bail!("unhandled logic expr: {}", logic),
                 },
-                _ => panic!("vars or mixed terms in domain condition"),
-            }
+                _ => bail!("vars or mixed terms in domain condition"),
+            })
         }
         LogicExpr::Membership { lhs, op, rhs } => {
-            let rhs = resolve_set_expr(rhs, idx_val_map, lookups);
-            match op {
+            let rhs = resolve_set_expr(rhs, idx_val_map, lookups)?;
+            Ok(match op {
                 MemberOp::In => lhs.iter().all(|elem| rhs.contains(elem)),
                 MemberOp::NotIn => lhs.iter().all(|elem| !rhs.contains(elem)),
-            }
+            })
         }
         LogicExpr::Subset { lhs, op, rhs } => {
-            let lhs = resolve_set_expr(lhs, idx_val_map, lookups);
-            let rhs = resolve_set_expr(rhs, idx_val_map, lookups);
-            match op {
+            let lhs = resolve_set_expr(lhs, idx_val_map, lookups)?;
+            let rhs = resolve_set_expr(rhs, idx_val_map, lookups)?;
+            Ok(match op {
                 SubsetOp::Within => lhs.iter().all(|elem| rhs.contains(elem)),
                 SubsetOp::NotWithin => lhs.iter().all(|elem| !rhs.contains(elem)),
-            }
+            })
         }
         LogicExpr::BoolOp { lhs, op, rhs } => {
-            let lhs = check_logic_condition(lhs, lookups, idx_val_map);
-            let rhs = check_logic_condition(rhs, lookups, idx_val_map);
-            match op {
+            let lhs = check_logic_condition(lhs, lookups, idx_val_map)?;
+            let rhs = check_logic_condition(rhs, lookups, idx_val_map)?;
+            Ok(match op {
                 BoolOp::And => lhs && rhs,
                 BoolOp::Or => lhs || rhs,
-            }
+            })
         }
     }
 }
@@ -355,41 +369,50 @@ fn expand_sum(
     sum_domain: &Domain,
     lookups: &Lookups,
     idx_val_map: &IdxValMap,
-) -> Vec<Term> {
-    domain_to_indexes(sum_domain, lookups, idx_val_map)
+) -> Result<Vec<Term>> {
+    Ok(domain_to_indexes(sum_domain, lookups, idx_val_map)?
         .into_iter()
-        .flat_map(|idx| {
-            let mut idx_map = get_index_map(&sum_domain.parts, &idx);
+        .map(|idx| {
+            let mut idx_map = get_index_map(&sum_domain.parts, &idx)?;
             idx_extend(&mut idx_map, idx_val_map);
             recurse(operand, lookups, &idx_map)
         })
-        .collect()
+        .collect::<Result<Vec<Vec<_>>>>()?
+        .into_iter()
+        .flatten()
+        .collect())
 }
 
-fn resolve_terms_to_num(terms: &[Term]) -> Option<f64> {
-    terms.iter().try_fold(0.0, |acc, t| match t {
-        Term::Str(_) => panic!("Cannot do math on a string term"),
-        Term::Num(num) => Some(acc + num),
-        Term::Pair(_) => None,
-    })
+fn resolve_terms_to_num(terms: &[Term]) -> Result<Option<f64>> {
+    let mut sum = 0.0;
+    for t in terms {
+        match t {
+            Term::Str(_) => bail!("Cannot do math on a string term"),
+            Term::Num(num) => sum += num,
+            Term::Pair(_) => return Ok(None),
+        }
+    }
+    Ok(Some(sum))
 }
 
-fn resolve_terms_to_term(terms: &[Term]) -> Term {
+fn resolve_terms_to_term(terms: &[Term]) -> Result<Term> {
     if terms.is_empty() {
-        panic!("empty domain condition on one side");
+        bail!("empty domain condition on one side");
     }
 
     match &terms[0] {
-        Term::Str(s) => Term::Str(*s),
-        Term::Pair(pair) => panic!(
+        Term::Str(s) => Ok(Term::Str(*s)),
+        Term::Pair(pair) => bail!(
             "Cannot have variables in final domain condition check: {:?}",
             pair
         ),
-        Term::Num(_) => Term::Num(terms.iter().fold(0.0, |acc, t| match t {
-            Term::Str(_) => panic!("mixed term types"),
-            Term::Num(num) => acc + num,
-            Term::Pair(_) => panic!("mixed term types"),
-        })),
+        Term::Num(_) => {
+            let sum = terms.iter().try_fold(0.0, |acc, t| match t {
+                Term::Num(num) => Ok(acc + num),
+                _ => bail!("mixed term types"),
+            })?;
+            Ok(Term::Num(sum))
+        }
     }
 }
 
@@ -430,18 +453,18 @@ pub fn algebra(lhs: Vec<Term>, rhs: Vec<Term>) -> (Vec<Pair>, f64) {
 
 // I'd prefer this function to accept an Index only, but then I have to clone for the Vec->SmallVec
 // conversion
-pub fn get_index_map(parts: &[DomainPart], idx: &[SetVal]) -> IdxValMap {
+pub fn get_index_map(parts: &[DomainPart], idx: &[SetVal]) -> Result<IdxValMap> {
     // idx_val_map stores the current LOCATION
     // as a dict like:
     // { y => 2014, r: "Africa" }
     //
     // This should be improved so that it also knows which set/dimension
     // each entry comes from...
-    parts
+    Ok(parts
         .iter()
         .zip(idx.iter().cloned())
-        .flat_map(|(part, idx_val)| -> SmallVec<[(Spur, SetVal); 4]> {
-            match (&part.var, idx_val) {
+        .map(|(part, idx_val)| -> Result<SmallVec<[(Spur, SetVal); 4]>> {
+            Ok(match (&part.var, idx_val) {
                 (DomainPartVar::Single(s), val) => smallvec::smallvec![(*s, val)],
                 (DomainPartVar::Tuple(vars), SetVal::Tuple(vals)) => vars
                     .iter()
@@ -454,14 +477,17 @@ pub fn get_index_map(parts: &[DomainPart], idx: &[SetVal]) -> IdxValMap {
                         (*v, set_val)
                     })
                     .collect(),
-                _ => {
-                    dbg!(&part.var);
-                    dbg!(&idx_val);
-                    panic!("mismatched tuple/non-tuple indexes");
-                }
-            }
+                _ => bail!(
+                    "Mismatched tuple/non-tuple indexes: idx_val: {}, var: {}",
+                    idx_val,
+                    part.var
+                ),
+            })
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect())
 }
 
 fn eval_func_minmax(
@@ -469,7 +495,7 @@ fn eval_func_minmax(
     is_min: bool,
     lookups: &Lookups,
     idx_val_map: &IdxValMap,
-) -> f64 {
+) -> Result<f64> {
     // FuncMin looks like this:
     // min{y in YEAR} min(y)
     // Assumptions:
@@ -483,63 +509,72 @@ fn eval_func_minmax(
                 .subscript
                 .iter()
                 .map(|k| idx_val_or_get(idx_val_map, k.var))
-                .collect::<Vec<_>>()
+                .collect::<Result<Vec<_>>>()?
                 .into();
             let resolved = lookups
                 .set_map
                 .get(&set_domain.set)
                 .unwrap()
-                .resolve(&concrete_set_keys, lookups);
-            let iter = resolved.iter().map(|si| match si {
-                SetVal::Str(_) => panic!("cannot use func min/max on string index"),
-                SetVal::Int(num) => *num,
-                SetVal::Tuple(_) => panic!("cannot use func min/max with tuple index"),
-            });
-            let val = if is_min { iter.min() } else { iter.max() }.unwrap();
-            val as f64
+                .resolve(&concrete_set_keys, lookups)?;
+
+            let val = resolved
+                .iter()
+                .try_fold(None::<u32>, |acc, si| {
+                    let num = match si {
+                        SetVal::Int(n) => *n,
+                        _ => bail!("cannot use func min/max on non-integer index"),
+                    };
+                    Ok(Some(match acc {
+                        Some(a) if is_min => a.min(num),
+                        Some(a) => a.max(num),
+                        None => num,
+                    }))
+                })?
+                .context("empty set for min/max")?;
+            Ok(val as f64)
         }
-        None => panic!("no parts in func min/max domain"),
+        None => bail!("no parts in func min/max domain"),
     }
 }
 
-fn negate_terms(terms: Vec<Term>) -> Vec<Term> {
+fn negate_terms(terms: Vec<Term>) -> Result<Vec<Term>> {
     terms
         .into_iter()
         .map(|t| match t {
-            Term::Str(_) => panic!("Cannot unary neg a string term"),
-            Term::Num(n) => Term::Num(-n),
-            Term::Pair(p) => Term::Pair(Pair {
+            Term::Str(_) => bail!("Cannot unary neg a string term"),
+            Term::Num(n) => Ok(Term::Num(-n)),
+            Term::Pair(p) => Ok(Term::Pair(Pair {
                 coeff: -p.coeff,
                 var: p.var,
                 index: p.index,
-            }),
+            })),
         })
         .collect()
 }
 
-fn concrete_index(susbcript: &Subscript, idx_val_map: &IdxValMap) -> Index {
-    susbcript
+fn concrete_index(susbcript: &Subscript, idx_val_map: &IdxValMap) -> Result<Index> {
+    Ok(susbcript
         .iter()
         .map(|i| {
             // First try to look up as a domain variable
             // If not found, check if it's a literal number
-            let index_val = idx_val_or_get(idx_val_map, i.var);
+            let index_val = idx_val_or_get(idx_val_map, i.var)?;
             match &i.shift {
                 Some(shift) => match index_val {
                     SetVal::Str(_) => {
-                        panic!("tried to index shift on string index val")
+                        bail!("tried to index shift on string index val")
                     }
                     SetVal::Int(index_num) => match shift {
-                        SubscriptShift::Plus => SetVal::Int(index_num + 1),
-                        SubscriptShift::Minus => SetVal::Int(index_num - 1),
+                        SubscriptShift::Plus => Ok(SetVal::Int(index_num + 1)),
+                        SubscriptShift::Minus => Ok(SetVal::Int(index_num - 1)),
                     },
                     SetVal::Tuple(_) => {
-                        panic!("tuple set not allowed in var subscript")
+                        bail!("tuple set not allowed in var subscript")
                     }
                 },
-                None => index_val,
+                None => Ok(index_val),
             }
         })
-        .collect::<Vec<_>>()
-        .into()
+        .collect::<Result<Vec<_>>>()?
+        .into())
 }

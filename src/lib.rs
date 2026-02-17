@@ -56,7 +56,7 @@ pub fn load_model_and_data(path: &str, data_path: Option<&str>) -> Result<Vec<En
 }
 
 /// Merge raw model and data into a `ModelWithData`.
-pub fn merge_model(entries: Vec<Entry>) -> ModelWithData {
+pub fn merge_model(entries: Vec<Entry>) -> Result<ModelWithData> {
     ModelWithData::from_entries(entries)
 }
 

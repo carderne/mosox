@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use anyhow::{Result, bail};
 use lasso::Spur;
 use smallvec::smallvec;
 
@@ -104,7 +105,7 @@ impl fmt::Display for ModelWithData {
 
 impl ModelWithData {
     /// Build a ModelWithData from a list of entries, matching data to model statements
-    pub fn from_entries(entries: Vec<Entry>) -> Self {
+    pub fn from_entries(entries: Vec<Entry>) -> Result<Self> {
         let mut objective = None;
         let mut sets = Vec::new();
         let mut params = Vec::new();
@@ -119,7 +120,7 @@ impl ModelWithData {
             match entry {
                 Entry::Objective(obj) => {
                     if objective.is_some() {
-                        panic!("Multiple objectives found");
+                        bail!("Multiple objectives found");
                     }
                     objective = Some(obj);
                 }
@@ -174,7 +175,7 @@ impl ModelWithData {
                 && dimen > 1
             {
                 for set_data in &mut data {
-                    set_data.values = regroup_set_values(&set_data.values, dimen as usize);
+                    set_data.values = regroup_set_values(&set_data.values, dimen as usize)?;
                 }
             }
 
@@ -183,7 +184,7 @@ impl ModelWithData {
 
         // Check for orphaned data sets
         if let Some((name, _)) = data_set_map.into_iter().next() {
-            panic!(
+            bail!(
                 "Data set '{}' has no matching model declaration",
                 intern_resolve(name)
             );
@@ -203,7 +204,7 @@ impl ModelWithData {
                     data: Some(data_param),
                 });
             } else {
-                panic!(
+                bail!(
                     "Data param '{}' has no matching model declaration",
                     intern_resolve(data_param.name)
                 );
@@ -221,36 +222,36 @@ impl ModelWithData {
         let objective = objective.expect("no objective function!");
         let sense = objective.sense;
 
-        let all_constraints = prep_constraints(objective, constraints);
+        let all_constraints = prep_constraints(objective, constraints)?;
 
-        ModelWithData {
+        Ok(ModelWithData {
             sense,
             sets: matched_sets,
             pars: matched_params,
             vars,
             checks,
             constraints: all_constraints,
-        }
+        })
     }
 }
 
 fn prep_constraints(
     objective: Objective,
     constraints: Vec<Constraint>,
-) -> Vec<ConstraintOrObjective> {
+) -> Result<Vec<ConstraintOrObjective>> {
     let mut all: Vec<ConstraintOrObjective> = constraints
         .into_iter()
         .map(|Constraint { name, domain, expr }| {
             let ConstraintExpr { lhs, rhs, op } = expr;
-            ConstraintOrObjective {
+            Ok(ConstraintOrObjective {
                 name,
                 domain,
-                row_type: RowType::from_rel_op(&op),
+                row_type: RowType::from_rel_op(&op)?,
                 lhs,
                 rhs,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<_>>()?;
     let Objective {
         name,
         expr,
@@ -263,31 +264,33 @@ fn prep_constraints(
         lhs: expr,
         rhs: Expr::Number(0.0),
     });
-    all
+    Ok(all)
 }
 
 /// Regroup flat set values into tuples based on dimension
 /// e.g., with dimen=2: [A, 1, B, 2, ...] -> [(A,1), (B,2), ...]
-fn regroup_set_values(values: &SetVals, dimen: usize) -> SetVals {
+fn regroup_set_values(values: &SetVals, dimen: usize) -> Result<SetVals> {
     // If already tuples or dimen is 1, return as-is
     if dimen <= 1 {
-        return values.clone();
+        return Ok(values.clone());
     }
 
     // Check if values are already tuples (first value is a Tuple)
     if let Some(SetVal::Tuple(_)) = values.first() {
-        return values.clone();
+        return Ok(values.clone());
     }
 
     // Convert flat values to terminals and group them
     let terminals: Vec<SetValTerminal> = values
         .iter()
-        .map(|v| match v {
-            SetVal::Str(s) => SetValTerminal::Str(*s),
-            SetVal::Int(i) => SetValTerminal::Int(*i),
-            SetVal::Tuple(_) => panic!("unexpected tuple in flat values"),
+        .map(|v| {
+            Ok(match v {
+                SetVal::Str(s) => SetValTerminal::Str(*s),
+                SetVal::Int(i) => SetValTerminal::Int(*i),
+                SetVal::Tuple(_) => bail!("unexpected tuple in flat values"),
+            })
         })
-        .collect();
+        .collect::<Result<Vec<SetValTerminal>>>()?;
 
     // Group by dimen (only supports 2-tuples currently)
     assert!(
@@ -301,5 +304,5 @@ fn regroup_set_values(values: &SetVals, dimen: usize) -> SetVals {
         .map(|chunk| SetVal::Tuple([chunk[0], chunk[1]]))
         .collect();
 
-    SetVals(tuples)
+    Ok(SetVals(tuples))
 }

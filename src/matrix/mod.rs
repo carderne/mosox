@@ -50,9 +50,9 @@ pub fn gen_matrix(model: ModelWithData) -> Result<Compiled> {
         checks,
         constraints,
     } = model;
-    let lookups = Lookups::from_model(sets, vars, pars);
+    let lookups = Lookups::from_model(sets, vars, pars)?;
     check_checks(checks, &lookups)?;
-    let cons = build_constraints(constraints, &lookups);
+    let cons = build_constraints(constraints, &lookups)?;
     build_cols_and_rows(sense, cons, &lookups)
 }
 
@@ -109,41 +109,44 @@ struct SolvedConstraint {
 fn build_constraints(
     constraints: Vec<ConstraintOrObjective>,
     lookups: &Lookups,
-) -> Vec<SolvedConstraint> {
-    constraints
+) -> Result<Vec<SolvedConstraint>> {
+    Ok(constraints
         .into_par_iter()
-        .flat_map(
+        .map(
             |ConstraintOrObjective {
                  name,
                  domain,
                  row_type,
                  lhs,
                  rhs,
-             }| {
-                // let row_type = Arc::new(row_type);
-
-                let (indexes, parts) = domain
-                    .map(|d| (domain_to_indexes(&d, lookups, &SmallVec::new()), d.parts))
-                    .unwrap_or_else(|| (vec![vec![].into()], vec![]));
+             }|
+             -> Result<Vec<SolvedConstraint>> {
+                let (indexes, parts) = match domain {
+                    Some(d) => (domain_to_indexes(&d, lookups, &SmallVec::new())?, d.parts),
+                    None => (vec![vec![].into()], vec![]),
+                };
 
                 indexes
                     .into_par_iter()
-                    .map(|con_index| {
+                    .map(|con_index| -> Result<SolvedConstraint> {
                         let con_index = Arc::new(con_index);
-                        let idx_val_map = get_index_map(&parts, &con_index);
-                        let lhs = recurse(&lhs, lookups, &idx_val_map);
-                        let rhs = recurse(&rhs, lookups, &idx_val_map);
+                        let idx_val_map = get_index_map(&parts, &con_index)?;
+                        let lhs = recurse(&lhs, lookups, &idx_val_map)?;
+                        let rhs = recurse(&rhs, lookups, &idx_val_map)?;
                         let (pairs, rhs_total) = algebra(lhs, rhs);
-                        SolvedConstraint {
+                        Ok(SolvedConstraint {
                             name,
                             idx: con_index,
                             row_type,
                             rhs: rhs_total,
                             pairs,
-                        }
+                        })
                     })
-                    .collect::<Vec<_>>()
+                    .collect()
             },
         )
-        .collect()
+        .collect::<Result<Vec<Vec<_>>>>()?
+        .into_iter()
+        .flatten()
+        .collect())
 }

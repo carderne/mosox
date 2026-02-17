@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use anyhow::Result;
 use indexmap::IndexMap;
 use lasso::Spur;
 
@@ -31,8 +32,8 @@ impl Lookups {
         sets: Vec<SetWithData>,
         vars: Vec<ir::Var>,
         pars: Vec<ParamWithData>,
-    ) -> Self {
-        Lookups {
+    ) -> Result<Self> {
+        Ok(Lookups {
             set_map: sets
                 .into_iter()
                 .map(|set| (set.decl.name, SetCont::from(set)))
@@ -40,19 +41,19 @@ impl Lookups {
             var_map: vars
                 .into_iter()
                 .map(|var| {
-                    (
+                    Ok((
                         var.name,
                         VarCont {
                             var_type: var.var_type,
-                            bounds: Bounds::from_gmpl_bounds(var.bounds),
+                            bounds: Bounds::from_gmpl_bounds(var.bounds)?,
                         },
-                    )
+                    ))
                 })
-                .collect(),
+                .collect::<Result<_>>()?,
             par_map: pars
                 .into_iter()
                 .map(|param| (param.decl.name, resolve_param(param)))
                 .collect(),
-        }
+        })
     }
 }
