@@ -536,7 +536,7 @@ impl SetData {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::id => name = Some(intern(pair.as_str())),
-                Rule::index => {
+                Rule::index_data => {
                     for inner in pair.into_inner() {
                         if inner.as_rule() == Rule::set_val_data {
                             index.push(SetVal::from_entry(inner)?);
