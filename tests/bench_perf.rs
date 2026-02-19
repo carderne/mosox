@@ -12,27 +12,6 @@ struct BenchCase {
 
 const CASES: &[BenchCase] = &[
     BenchCase {
-        name: "basic",
-        mod_file: "examples/basic/model.mod",
-        dat_file: None,
-        iterations: 200,
-        needs_large: false,
-    },
-    BenchCase {
-        name: "2d_params",
-        mod_file: "examples/2d_params/model.mod",
-        dat_file: None,
-        iterations: 200,
-        needs_large: false,
-    },
-    BenchCase {
-        name: "sets",
-        mod_file: "examples/sets/model.mod",
-        dat_file: None,
-        iterations: 200,
-        needs_large: false,
-    },
-    BenchCase {
         name: "osemosys_small",
         mod_file: "examples/osemosys_small/osemosys.mod",
         dat_file: Some("examples/osemosys_small/ose_small.dat"),

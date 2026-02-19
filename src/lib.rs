@@ -66,6 +66,12 @@ pub fn generate_matrix(model: ModelWithData) -> Result<Compiled> {
     let t0 = Instant::now();
     let compiled = gen_matrix(model)?;
     eprintln!("Matrix compiled in {:?}", t0.elapsed());
+
+    let num_rows = compiled.cons.len();
+    let num_cols = compiled.vars.len();
+    let num_nonzero: usize = compiled.vars.values().map(|v| v.coeffs.len()).sum();
+    eprintln!("Matrix: {num_rows} rows, {num_cols} cols, {num_nonzero} nonzero");
+
     Ok(compiled)
 }
 

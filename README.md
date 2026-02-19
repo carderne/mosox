@@ -113,7 +113,7 @@ This will additionally run a regression test against `examples/osemosys_large` i
 cargo make testlarge
 ```
 
-### Benchmarks
+## Benchmarks
 Run performance benchmarks across all examples (except `osemosys_large`):
 ```bash
 cargo make bench
@@ -132,14 +132,23 @@ cargo make benchglpsol
 #### Performance vs glpsol (median, release build, Macbook Air M2)
 Note that some of the performance advantage over glpsol may be caused by the limitations enumerated below.
 
-| Example           | N   | glpsol | mosox   | Speedup |
-|---------          |---  |--------|-------  |---------|
-| basic             | 200 | 2.0ms  | 1.9ms   | 1.1x    |
-| 2d_params         | 200 | 2.0ms  | 2.0ms   | 1.0x    |
-| sets              | 200 | 2.1ms  | 1.9ms   | 1.1x    |
-| osemosys_small    | 50  | 68.1ms | 17.0ms  | 4.0x    |
-| osemosys_atlantis | 10  | 2.4s   | 372.5ms | 6.5x    |
-| osemosys_large    | 4   | 130.3s | 20.0s   | 6.5x    |
+| Example          | rows/cols/nonzero | N   | glpsol | mosox  | Speedup |
+|---------         | ----------------- | --- |--------|------- |---------|
+| osemosys_small   | 6k/7k/15k         | 50  | 68ms   | 17ms   | 4.0x    |
+| osemosys_atlantis| 180k/230k/510k    | 10  | 2.4s   | 373ms  | 6.5x    |
+| osemosys_large   | 1M/5M/12M         | 4   | 130s   | 20s    | 6.5x    |
+
+### Memory usage
+
+The matrix generator uses very roughly 2,000 bytes per non-zero.
+This is a significant overhead over the 12 bytes bytes per non-zero that would be needed in a format like CSC.
+However, as the table below shows, the matrix generator will rarely (if ever) use more memory than the solver.
+
+| Example          | Mosox matrix | Glpsol matrix | HiGHS solver | Glpsol solver |
+|---------         | ------------ | ------------- | ------------ | ------------- |
+| osemosys_small   | 13 MB        | 12 MB         | 24 MB        | 16 MB         |
+| osemosys_atlantis| 244 MB       | 287 MB        | 386 MB       | 416 MB        |
+| osemosys_large   | 5 GB         | 5.6 GB        | 6.5 GB       | ?             |
 
 ## Known limitations
 This list of limitations is made with reference to the GNU MathProg Language Reference which can be viewed [here](./docs/gmpl.pdf) or downloaded from the original [here](https://www.gnu.org/software/glpk).
