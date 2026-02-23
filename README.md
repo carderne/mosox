@@ -13,6 +13,8 @@ See [Known limitations](#known-limitations) section below.
 
 There are a number of examples of varying complexity in the [examples/](./examples/) directory.
 
+Developed by and for [Climate Compatible Growth](https://climatecompatiblegrowth.com/).
+
 ## Quickstart
 
 ### Installation
