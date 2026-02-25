@@ -34,6 +34,9 @@ enum Commands {
         data_path: Option<String>,
         #[arg(short, long, default_value_t = Format::Txt)]
         format: Format,
+        /// Solver options as KEY=VALUE pairs (e.g. -c threads=4 -c log_file=out.txt)
+        #[arg(short = 'c', long = "config", value_name = "KEY=VALUE")]
+        highs_config: Vec<String>,
     },
     /// Normalize an MPS file for diffing
     Normalize { input: String, output: String },
@@ -60,11 +63,23 @@ fn run() -> anyhow::Result<()> {
             path,
             data_path,
             format,
+            highs_config,
         } => {
+            let config: Vec<(String, String)> = highs_config
+                .iter()
+                .map(|s| {
+                    let (k, v) = s.split_once('=').unwrap_or_else(|| {
+                        eprintln!("Warning: --highs-config value {s:?} has no '=', ignoring");
+                        ("", "")
+                    });
+                    (k.to_string(), v.to_string())
+                })
+                .filter(|(k, _)| !k.is_empty())
+                .collect();
             let entries = load_model_and_data(path, data_path.as_deref())?;
             let model = merge_model(entries)?;
             let compiled = generate_matrix(model)?;
-            solve_matrix(compiled, format.clone());
+            solve_matrix(compiled, format.clone(), &config)?;
             Ok(())
         }
         Commands::Normalize { input, output } => {

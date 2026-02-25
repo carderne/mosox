@@ -82,12 +82,13 @@ pub fn matrix_to_mps(compiled: Compiled, model_name: &str) {
 }
 
 /// Solve the compiled matrix with Highs
-pub fn solve_matrix(compiled: Compiled, format: Format) {
+pub fn solve_matrix(compiled: Compiled, format: Format, config: &[(String, String)]) -> Result<()> {
     eprintln!("Solving matrix with HiGHS");
     let t0 = Instant::now();
-    highs_solve(compiled, format);
+    highs_solve(compiled, format, config)?;
     eprintln!("Solved in {:?}", t0.elapsed());
     eprintln!("Results output to stdout");
+    Ok(())
 }
 
 /// Get the stem from a path.
