@@ -70,7 +70,7 @@ set_vals         = { (","? ~ set_val)+ }
 set_val          = { id | int }
 
 // unlike `domain`, this doesn't allow a condition, and the "f in" part is optional
-set_within      =  { "within" ~ within_set ~ ("cross" ~ cross_set)? }
+set_within      =  { "within" ~ (id | domain) ~ ("cross" ~ cross_set)? }
 within_set      = @{ id }
 cross_set       = @{ id }
 
