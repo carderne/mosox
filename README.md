@@ -158,7 +158,7 @@ This list of limitations is made with reference to the GNU MathProg Language Ref
 It is intended that all of these will ultimately be supported, and most of them are "trivial" to add.
 
 ### Functions
-- The following functions: `abs`, `atan`, `card`, `ceil`, `cos`, `exp`, `floor`, `gmtime`, `length`, `log`, `prod`, `round`, `sin`, `sqrt`, `str2time`, `trunc`, `Irand224`, `Uniform`, `Normal`.
+- The following functions: `abs`, `atan`, `ceil`, `cos`, `exp`, `floor`, `gmtime`, `length`, `log`, `prod`, `round`, `sin`, `sqrt`, `str2time`, `trunc`, `Irand224`, `Uniform`, `Normal`.
 
 ### Expressions
 - These arithmetic operators: `less`, `div`, `mod`

@@ -210,9 +210,10 @@ conditional     =  { "if" ~ logic_expr ~ "then" ~ expr ~ ("else" ~ expr)? }
 // min/max have special syntax: min{domain} min(var)
 // They should technically have the same priority as sum (prefix) but they're never used
 // like that so just leaving them as-is
-func             = _{ func_min | func_max }
+func             = _{ func_min | func_max | func_card }
 func_min         =  { "min" ~ domain ~ "min" ~ "(" ~ func_var ~ ")" }
 func_max         =  { "max" ~ domain ~ "max" ~ "(" ~ func_var ~ ")" }
+func_card        =  { "card" ~ "(" ~ func_var ~ subscript? ~ ")" }
 func_var         = @{ id }
 bool_and         =  { "and" | "&&" }
 bool_or          =  { "or" | "||" }

@@ -115,6 +115,15 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Resul
             let val = eval_func_minmax(&func.domain, false, lookups, idx_val_map)?;
             Ok(vec![Term::Num(val)])
         }
+        Expr::FuncCard(func) => {
+            let set_cont = lookups
+                .set_map
+                .get(&func.set)
+                .with_context(|| format!("card(): unknown set '{}'", intern_resolve(func.set)))?;
+            let index = concrete_index(&func.subscript, idx_val_map)?;
+            let resolved = set_cont.resolve(&index, lookups)?;
+            Ok(vec![Term::Num(resolved.len() as f64)])
+        }
         Expr::Conditional(conditional) => {
             let default;
             let expr: &Expr =

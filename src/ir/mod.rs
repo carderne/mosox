@@ -997,6 +997,7 @@ pub enum Expr {
     FuncSum(Box<FuncSum>),
     FuncMin(Box<FuncMin>),
     FuncMax(Box<FuncMax>),
+    FuncCard(Box<FuncCard>),
     Conditional(Box<Conditional>),
     UnaryNeg(Box<Expr>),
     BinOp {
@@ -1020,6 +1021,7 @@ pub fn parse_expr(pairs: Pairs<Rule>) -> Result<Expr> {
             Rule::var_subscripted => Ok(Expr::VarSubscripted(VarSubscripted::from_entry(primary)?)),
             Rule::func_min => Ok(Expr::FuncMin(Box::new(FuncMin::from_entry(primary)?))),
             Rule::func_max => Ok(Expr::FuncMax(Box::new(FuncMax::from_entry(primary)?))),
+            Rule::func_card => Ok(Expr::FuncCard(Box::new(FuncCard::from_entry(primary)?))),
             Rule::conditional => Ok(Expr::Conditional(Box::new(Conditional::from_entry(
                 primary,
             )?))),
@@ -1074,6 +1076,7 @@ impl fmt::Display for Expr {
             Expr::FuncSum(func) => write!(f, "{}", **func),
             Expr::FuncMin(func) => write!(f, "{}", **func),
             Expr::FuncMax(func) => write!(f, "{}", **func),
+            Expr::FuncCard(func) => write!(f, "{}", **func),
             Expr::Conditional(cond) => write!(f, "{}", **cond),
             Expr::UnaryNeg(e) => write!(f, "-{}", **e),
             Expr::BinOp { lhs, op, rhs } => write!(f, "({} {} {})", **lhs, op, **rhs),
@@ -1876,5 +1879,42 @@ impl FuncMax {
 impl fmt::Display for FuncMax {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "max <domain> max(<var>)")
+    }
+}
+
+/// Card function (cardinality of a set)
+#[derive(Clone, Debug)]
+pub struct FuncCard {
+    pub set: Spur,
+    pub subscript: Subscript,
+}
+
+impl FuncCard {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        let mut set = None;
+        let mut subscript = Subscript::default();
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::func_var => set = Some(intern(pair.as_str())),
+                Rule::subscript => subscript = Subscript::from_entry(pair)?,
+                _ => {}
+            }
+        }
+
+        Ok(Self {
+            set: set.context("missing func_card set name")?,
+            subscript,
+        })
+    }
+}
+
+impl fmt::Display for FuncCard {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "card({})", intern_resolve(self.set))?;
+        if !self.subscript.is_empty() {
+            write!(f, "[...]")?;
+        }
+        Ok(())
     }
 }
