@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{Result, bail};
+use crate::ir::interner::intern_resolve;
+use anyhow::{Context, Result, bail};
 
 use crate::{
     ir::{
-        self, DomainPartVar, Index, SetData, SetExpr, SetOf, SetRef, SetVal, SetValTerminal,
-        SetVals, SetValue, model::SetWithData,
+        self, DomainPartRange, DomainPartVar, DomainRangeEnd, Index, SetData, SetExpr, SetOf,
+        SetRef, SetVal, SetValTerminal, SetVals, SetValue, model::SetWithData,
     },
     matrix::{
         constraint::{IdxValMap, domain_to_indexes, get_index_map, idx_get, idx_val_or_get},
@@ -199,6 +200,52 @@ fn resolve_set_of(set_of: &SetOf, idx_val_map: &IdxValMap, lookups: &Lookups) ->
     }
 
     Ok(result.into())
+}
+
+/// Resolve a `DomainPartRange` (e.g. `1..NbYears` or `1..NbSeasons[y]`) to the sequence of
+/// integer `SetVal`s it represents: `[lo, lo+1, ..., hi]` inclusive.
+pub fn resolve_domain_range(
+    range: &DomainPartRange,
+    idx_val_map: &IdxValMap,
+    lookups: &Lookups,
+) -> Result<SetVals> {
+    let lo = resolve_range_end(&range.lo, idx_val_map, lookups)?;
+    let hi = resolve_range_end(&range.hi, idx_val_map, lookups)?;
+    Ok((lo..=hi).map(SetVal::Int).collect::<Vec<_>>().into())
+}
+
+/// Resolve a single range endpoint to a concrete `u32`.
+fn resolve_range_end(
+    end: &DomainRangeEnd,
+    idx_val_map: &IdxValMap,
+    lookups: &Lookups,
+) -> Result<u32> {
+    match end {
+        DomainRangeEnd::Int(n) => Ok(*n),
+        DomainRangeEnd::Named { name, subscript } => {
+            // Build the concrete index from the subscript parts
+            let index: Index = subscript
+                .iter()
+                .map(|part| idx_val_or_get(idx_val_map, part.var))
+                .collect::<Result<Vec<_>>>()?
+                .into();
+
+            // Look up as a param — range ends must be scalar integers
+            let param = lookups.par_map.get(name).with_context(|| {
+                format!("range end '{}' not found in params", intern_resolve(*name))
+            })?;
+
+            let val = match &param.data {
+                crate::matrix::param::ParamVal::Scalar(n) => *n,
+                crate::matrix::param::ParamVal::Arr(arr) => *arr
+                    .get(&index)
+                    .context("no value at index for range end param")?,
+                _ => bail!("range end param must be a numeric scalar or array"),
+            };
+
+            Ok(val as u32)
+        }
+    }
 }
 
 fn intersect<T: Eq + std::hash::Hash + Clone>(vecs: Vec<Vec<T>>) -> Vec<T> {

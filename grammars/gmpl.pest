@@ -163,7 +163,10 @@ param_data_any      =  { "*" }
 // example:
 // {r in REG, t in TECH:Capacity[r,t,y]<>0}
 domain             =  { "{" ~ (domain_part ~ ","?)+ ~ (":" ~ logic_expr)? ~ "}" }
-domain_part        =  { (domain_var ~ "in")? ~ domain_set ~ subscript? }
+domain_part        =  { (domain_var ~ "in")? ~ (domain_part_range | domain_part_set) }
+domain_part_set    =  { domain_set ~ subscript? }
+domain_part_range  =  { domain_range_end ~ ".." ~ domain_range_end }
+domain_range_end   =  { int | (domain_set ~ subscript?) }
 domain_var         =  { domain_var_single | domain_var_tuple }
 domain_var_single  = @{ id }
 domain_var_tuple   = { "(" ~ id ~ ("," ~ id)+ ~ ")" }

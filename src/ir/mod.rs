@@ -1073,15 +1073,13 @@ impl Domain {
 #[derive(Clone, Debug)]
 pub struct DomainPart {
     pub var: DomainPartVar,
-    pub set: Spur,
-    pub subscript: Subscript,
+    pub expr: DomainPartExpr,
 }
 
 impl DomainPart {
     pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
-        let mut var = DomainPartVar::Single(intern(""));
-        let mut subscript = Subscript::default();
-        let mut set: Option<Spur> = None;
+        let mut var = DomainPartVar::None;
+        let mut expr = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
@@ -1100,19 +1098,123 @@ impl DomainPart {
                         _ => bail!("unexpected domain_var variant: {:?}", inner.as_rule()),
                     };
                 }
-                Rule::subscript => {
-                    subscript = Subscript::from_entry(pair)?;
+                Rule::domain_part_set => {
+                    expr = Some(DomainPartExpr::Set(DomainPartSet::from_entry(pair)?))
                 }
-                Rule::domain_set => set = Some(intern(pair.as_str())),
+                Rule::domain_part_range => {
+                    expr = Some(DomainPartExpr::Range(DomainPartRange::from_entry(pair)?))
+                }
                 _ => {}
             }
         }
 
         Ok(Self {
             var,
+            expr: expr.context("missing domain_part expr")?,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum DomainPartExpr {
+    /// `(var in)? SET[subscript]`  — e.g. `r in REGION`, `TECH`
+    Set(DomainPartSet),
+    /// `(var in)? lo..hi`          — e.g. `1..NbYears`, `1..NbSeasons[y]`
+    Range(DomainPartRange),
+}
+
+/// Set-membership domain part: `(var in)? SET[subscript]`
+#[derive(Clone, Debug)]
+pub struct DomainPartSet {
+    pub set: Spur,
+    pub subscript: Subscript,
+}
+
+impl DomainPartSet {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        let mut subscript = Subscript::default();
+        let mut set: Option<Spur> = None;
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::subscript => subscript = Subscript::from_entry(pair)?,
+                Rule::domain_set => set = Some(intern(pair.as_str())),
+                _ => {}
+            }
+        }
+
+        Ok(Self {
             subscript,
             set: set.context("missing domain set")?,
         })
+    }
+}
+
+/// Range domain part: `(var in)? lo..hi`
+#[derive(Clone, Debug)]
+pub struct DomainPartRange {
+    pub lo: DomainRangeEnd,
+    pub hi: DomainRangeEnd,
+}
+
+impl DomainPartRange {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        // domain_part_range = { (domain_var ~ "in")? ~ domain_range_end ~ ".." ~ domain_range_end }
+        // domain_range_end  = { int | (domain_set ~ subscript?) }
+        let mut lo: Option<DomainRangeEnd> = None;
+        let mut hi: Option<DomainRangeEnd> = None;
+
+        for pair in entry.into_inner() {
+            if pair.as_rule() == Rule::domain_range_end {
+                let end = DomainRangeEnd::from_entry(pair)?;
+                if lo.is_none() {
+                    lo = Some(end);
+                } else {
+                    hi = Some(end);
+                }
+            }
+        }
+
+        Ok(Self {
+            lo: lo.context("missing range lower bound")?,
+            hi: hi.context("missing range upper bound")?,
+        })
+    }
+}
+
+/// Range endpoint: either a bare integer or a named set with an optional subscript
+#[derive(Clone, Debug)]
+pub enum DomainRangeEnd {
+    /// A literal integer, e.g. `1`
+    Int(u32),
+    /// A named value (set reference) with optional subscript, e.g. `NbYears` or `NbSeasons[y]`
+    Named { name: Spur, subscript: Subscript },
+}
+
+impl DomainRangeEnd {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        // domain_range_end = { int | (domain_set ~ subscript?) }
+        let mut int_val: Option<u32> = None;
+        let mut name: Option<Spur> = None;
+        let mut subscript = Subscript::default();
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::int => int_val = Some(pair.as_str().parse()?),
+                Rule::domain_set => name = Some(intern(pair.as_str())),
+                Rule::subscript => subscript = Subscript::from_entry(pair)?,
+                _ => {}
+            }
+        }
+
+        if let Some(n) = int_val {
+            Ok(DomainRangeEnd::Int(n))
+        } else {
+            Ok(DomainRangeEnd::Named {
+                name: name.context("missing domain_range_end name")?,
+                subscript,
+            })
+        }
     }
 }
 

@@ -2,10 +2,10 @@ use crate::ir::{
     BoolOp, Domain, DomainPart, DomainPartVar, Expr, Index, MathOp, RelOp, SetVal, SetValTerminal,
     Subscript, SubscriptShift, interner::intern_resolve,
 };
-use crate::ir::{LogicExpr, MemberOp, SubscriptPartVar, SubsetOp};
+use crate::ir::{DomainPartExpr, DomainRangeEnd, LogicExpr, MemberOp, SubscriptPartVar, SubsetOp};
 use crate::matrix::lookup::Lookups;
 use crate::matrix::param::ParamVal;
-use crate::matrix::set::resolve_set_expr;
+use crate::matrix::set::{resolve_domain_range, resolve_set_expr};
 use anyhow::{Context, Result, bail};
 use itertools::Itertools;
 use lasso::Spur;
@@ -235,64 +235,96 @@ pub fn domain_to_indexes(
     idx_val_map: &IdxValMap,
 ) -> Result<Vec<Index>> {
     let Domain { parts, condition } = domain;
-    let cartesian: Box<dyn Iterator<Item = Vec<SetVal>>> =
-        if parts.iter().all(|part| part.subscript.is_empty()) {
-            Box::new(
-                parts
-                    .iter()
-                    .map(|part| -> Result<Vec<SetVal>> {
-                        let concrete_idx: Index = vec![].into();
-                        Ok(lookups
+
+    let all_simple = parts.iter().all(|part| match &part.expr {
+        DomainPartExpr::Set(set) => set.subscript.is_empty(),
+        DomainPartExpr::Range(range) => {
+            let lo_simple = match &range.lo {
+                DomainRangeEnd::Int(_) => true,
+                DomainRangeEnd::Named { name: _, subscript } => subscript.is_empty(),
+            };
+            let hi_simple = match &range.hi {
+                DomainRangeEnd::Int(_) => true,
+                DomainRangeEnd::Named { name: _, subscript } => subscript.is_empty(),
+            };
+            lo_simple && hi_simple
+        }
+    });
+
+    let cartesian: Box<dyn Iterator<Item = Vec<SetVal>>> = if all_simple {
+        Box::new(
+            parts
+                .iter()
+                .map(|part| -> Result<Vec<SetVal>> {
+                    let concrete_idx: Index = vec![].into();
+                    match &part.expr {
+                        DomainPartExpr::Set(part) => Ok(lookups
                             .set_map
                             .get(&part.set)
                             .unwrap()
                             .resolve(&concrete_idx, lookups)?
-                            .0)
+                            .0),
+                        DomainPartExpr::Range(range) => {
+                            Ok(resolve_domain_range(range, idx_val_map, lookups)?.0)
+                        }
+                    }
+                })
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .multi_cartesian_product(),
+        )
+    } else {
+        // GMPL has a degenerate feature where in a domain expression like
+        // { a in A, b in B[a] }
+        // a later indexed set can refer to a set value from another one
+
+        // The Box dyn is just to keep the variable as an iterator so we can
+        // reassign to it but not have to collect it until we're done iterating
+        let mut cartesian: Box<dyn Iterator<Item = Vec<SetVal>>> =
+            Box::new(vec![vec![]].into_iter());
+        for part in parts {
+            cartesian = Box::new(
+                cartesian
+                    .map(|existing| -> Result<Vec<Vec<SetVal>>> {
+                        let mut idx_map = get_index_map(parts, &existing)?;
+                        idx_extend(&mut idx_map, idx_val_map);
+
+                        match &part.expr {
+                            DomainPartExpr::Set(part) => {
+                                let concrete_idx = concrete_index(&part.subscript, &idx_map)?;
+
+                                Ok(lookups
+                                    .set_map
+                                    .get(&part.set)
+                                    .unwrap()
+                                    .resolve(&concrete_idx, lookups)?
+                                    .iter()
+                                    .map(|val| {
+                                        let mut new_idx = existing.clone();
+                                        new_idx.push(*val);
+                                        new_idx
+                                    })
+                                    .collect::<Vec<_>>())
+                            }
+                            DomainPartExpr::Range(range) => {
+                                Ok(resolve_domain_range(range, &idx_map, lookups)?
+                                    .iter()
+                                    .map(|val| {
+                                        let mut new_idx = existing.clone();
+                                        new_idx.push(*val);
+                                        new_idx
+                                    })
+                                    .collect::<Vec<_>>())
+                            }
+                        }
                     })
                     .collect::<Result<Vec<_>>>()?
                     .into_iter()
-                    .multi_cartesian_product(),
-            )
-        } else {
-            // GMPL has a degenerate feature where in a domain expression like
-            // { a in A, b in B[a] }
-            // a later indexed set can refer to a set value from another one
-            // Plausibly this could go twice like
-            // { a in A, b in B[a], c in C[b] }
-            // but I'm hoping not to support that
-
-            // The Box dyn is just to keep the variable as an iterator so we can
-            // reassign to it but not have to collect it until we're done iterating
-            let mut cartesian: Box<dyn Iterator<Item = Vec<SetVal>>> =
-                Box::new(vec![vec![]].into_iter());
-            for part in parts {
-                cartesian = Box::new(
-                    cartesian
-                        .map(|existing| -> Result<Vec<Vec<SetVal>>> {
-                            let mut idx_map = get_index_map(parts, &existing)?;
-                            idx_extend(&mut idx_map, idx_val_map);
-                            let concrete_idx = concrete_index(&part.subscript, &idx_map)?;
-
-                            Ok(lookups
-                                .set_map
-                                .get(&part.set)
-                                .unwrap()
-                                .resolve(&concrete_idx, lookups)?
-                                .iter()
-                                .map(|val| {
-                                    let mut new_idx = existing.clone();
-                                    new_idx.push(*val);
-                                    new_idx
-                                })
-                                .collect::<Vec<_>>())
-                        })
-                        .collect::<Result<Vec<_>>>()?
-                        .into_iter()
-                        .flatten(),
-                );
-            }
-            cartesian
-        };
+                    .flatten(),
+            );
+        }
+        cartesian
+    };
 
     cartesian
         .map(|idx| -> Result<Option<Index>> {
@@ -512,36 +544,44 @@ fn eval_func_minmax(
     // - always just getting the min of that set
 
     // Only support min/maxing a single dimension
+    if domain.parts.len() > 1 {
+        bail!("min/max func can only operate on one dimension");
+    }
     match domain.parts.first() {
-        Some(set_domain) => {
-            let concrete_set_keys: Index = set_domain
-                .subscript
-                .iter()
-                .map(|k| idx_val_or_get(idx_val_map, k.var))
-                .collect::<Result<Vec<_>>>()?
-                .into();
-            let resolved = lookups
-                .set_map
-                .get(&set_domain.set)
-                .unwrap()
-                .resolve(&concrete_set_keys, lookups)?;
+        Some(set_domain) => match &set_domain.expr {
+            DomainPartExpr::Range(_) => {
+                bail!("cannot use min/max func with arithmetic set expression")
+            }
+            DomainPartExpr::Set(set_domain) => {
+                let concrete_set_keys: Index = set_domain
+                    .subscript
+                    .iter()
+                    .map(|k| idx_val_or_get(idx_val_map, k.var))
+                    .collect::<Result<Vec<_>>>()?
+                    .into();
+                let resolved = lookups
+                    .set_map
+                    .get(&set_domain.set)
+                    .unwrap()
+                    .resolve(&concrete_set_keys, lookups)?;
 
-            let val = resolved
-                .iter()
-                .try_fold(None::<u32>, |acc, si| {
-                    let num = match si {
-                        SetVal::Int(n) => *n,
-                        _ => bail!("cannot use func min/max on non-integer index"),
-                    };
-                    Ok(Some(match acc {
-                        Some(a) if is_min => a.min(num),
-                        Some(a) => a.max(num),
-                        None => num,
-                    }))
-                })?
-                .context("empty set for min/max")?;
-            Ok(val as f64)
-        }
+                let val = resolved
+                    .iter()
+                    .try_fold(None::<u32>, |acc, si| {
+                        let num = match si {
+                            SetVal::Int(n) => *n,
+                            _ => bail!("cannot use func min/max on non-integer index"),
+                        };
+                        Ok(Some(match acc {
+                            Some(a) if is_min => a.min(num),
+                            Some(a) => a.max(num),
+                            None => num,
+                        }))
+                    })?
+                    .context("empty set for min/max")?;
+                Ok(val as f64)
+            }
+        },
         None => bail!("no parts in func min/max domain"),
     }
 }
