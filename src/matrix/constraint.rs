@@ -342,7 +342,7 @@ pub fn check_logic_condition(
                 (Term::Str(lhs), Term::Str(rhs)) => match op {
                     RelOp::Eq => lhs == rhs,
                     RelOp::Ne => lhs != rhs,
-                    _ => bail!("unhandled logic expr: {}", logic),
+                    _ => bail!("unhandled logic expr: TODO"),
                 },
                 _ => bail!("vars or mixed terms in domain condition"),
             })
@@ -489,7 +489,7 @@ pub fn get_index_map(parts: &[DomainPart], idx: &[SetVal]) -> Result<IdxValMap> 
                 _ => bail!(
                     "Mismatched tuple/non-tuple indexes: idx_val: {}, var: {}",
                     idx_val,
-                    part.var
+                    "TODO", // part.var
                 ),
             })
         })

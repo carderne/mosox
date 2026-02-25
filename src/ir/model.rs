@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt;
 
 use anyhow::{Result, bail};
 use lasso::Spur;
@@ -20,31 +19,11 @@ pub struct SetWithData {
     pub data: Vec<SetData>,
 }
 
-impl fmt::Display for SetWithData {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.decl)?;
-        for data in &self.data {
-            write!(f, "\n  {}", data)?;
-        }
-        Ok(())
-    }
-}
-
 /// A parameter declaration with optional data
 #[derive(Clone, Debug)]
 pub struct ParamWithData {
     pub decl: Param,
     pub data: Option<ParamData>,
-}
-
-impl fmt::Display for ParamWithData {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.decl)?;
-        if let Some(data) = &self.data {
-            write!(f, "\n  {}", data)?;
-        }
-        Ok(())
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -56,17 +35,6 @@ pub struct ConstraintOrObjective {
     pub rhs: Expr,
 }
 
-impl fmt::Display for ConstraintOrObjective {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "constraint {}", intern_resolve(self.name))?;
-        if self.domain.is_some() {
-            write!(f, " <domain>")?;
-        }
-        write!(f, ": {}", self.lhs)?;
-        write!(f, ": {}", self.rhs)
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct ModelWithData {
     pub sense: ObjSense,
@@ -75,32 +43,6 @@ pub struct ModelWithData {
     pub pars: Vec<ParamWithData>,
     pub checks: Vec<Check>,
     pub constraints: Vec<ConstraintOrObjective>,
-}
-
-impl fmt::Display for ModelWithData {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for set in &self.sets {
-            writeln!(f, "{}", set)?;
-        }
-
-        for param in &self.pars {
-            writeln!(f, "{}", param)?;
-        }
-
-        for var in &self.vars {
-            writeln!(f, "{}", var)?;
-        }
-
-        for check in &self.checks {
-            writeln!(f, "{}", check)?;
-        }
-
-        for constraint in &self.constraints {
-            writeln!(f, "{}", constraint)?;
-        }
-
-        Ok(())
-    }
 }
 
 impl ModelWithData {

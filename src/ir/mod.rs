@@ -79,22 +79,6 @@ impl Var {
     }
 }
 
-impl fmt::Display for Var {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "var {}", intern_resolve(self.name))?;
-        if self.domain.is_some() {
-            write!(f, " <domain>")?;
-        }
-        for bounds in &self.bounds {
-            write!(f, " {}", bounds)?;
-        }
-        if !matches!(self.var_type, VarType::Float) {
-            write!(f, " {}", self.var_type)?;
-        }
-        Ok(())
-    }
-}
-
 /// Parameter assignment (expression or inline data)
 #[derive(Clone, Debug)]
 pub enum ParamAssign {
@@ -164,33 +148,6 @@ impl Param {
             default,
             assign,
         })
-    }
-}
-
-impl fmt::Display for Param {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "param {}", intern_resolve(self.name))?;
-        if self.domain.is_some() {
-            write!(f, " <domain>")?;
-        }
-        if !matches!(self.param_type, ParamType::Float) {
-            write!(f, " {}", self.param_type)?;
-        }
-        if !self.conditions.is_empty() {
-            write!(f, " <conditions>")?;
-        }
-        if self.param_in.is_some() {
-            write!(f, " in <expr>")?;
-        }
-        if self.default.is_some() {
-            write!(f, " default <expr>")?;
-        }
-        match &self.assign {
-            Some(ParamAssign::Expr(_)) => write!(f, " := <expr>")?,
-            Some(ParamAssign::Data(_)) => write!(f, " := <data>")?,
-            None => {}
-        }
-        Ok(())
     }
 }
 
@@ -283,12 +240,6 @@ impl Set {
             inline_data,
             default,
         })
-    }
-}
-
-impl fmt::Display for Set {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "set {}", intern_resolve(self.name))
     }
 }
 
@@ -432,12 +383,6 @@ impl Objective {
     }
 }
 
-impl fmt::Display for Objective {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}: <expr>", self.sense, intern_resolve(self.name))
-    }
-}
-
 /// Constraint
 #[derive(Clone, Debug)]
 pub struct Constraint {
@@ -469,16 +414,6 @@ impl Constraint {
     }
 }
 
-impl fmt::Display for Constraint {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "constraint {}", intern_resolve(self.name))?;
-        if self.domain.is_some() {
-            write!(f, " <domain>")?;
-        }
-        write!(f, ": {}", self.expr)
-    }
-}
-
 /// Check statement
 #[derive(Clone, Debug)]
 pub struct Check {
@@ -506,16 +441,6 @@ impl Check {
             domain,
             expr: expr.context("missing check expr")?,
         })
-    }
-}
-
-impl fmt::Display for Check {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "check")?;
-        if self.domain.is_some() {
-            write!(f, " <domain>")?;
-        }
-        write!(f, " {}", self.expr)
     }
 }
 
@@ -555,17 +480,6 @@ impl SetData {
             index,
             values,
         })
-    }
-}
-
-impl fmt::Display for SetData {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "data: set {} := <{} values>",
-            intern_resolve(self.name),
-            self.values.len()
-        )
     }
 }
 
@@ -633,31 +547,6 @@ impl ParamData {
     }
 }
 
-impl fmt::Display for ParamData {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "data: param {}", intern_resolve(self.name))?;
-        if self.default.is_some() {
-            write!(f, " default <value>")?;
-        }
-        match &self.body {
-            Some(ParamDataBody::Tables(tables)) => {
-                write!(f, " := <{} table(s)>", tables.len())?;
-            }
-            Some(ParamDataBody::List(pairs)) => {
-                write!(f, " := <{} pair(s)>", pairs.len())?;
-            }
-            Some(ParamDataBody::Num(num)) => {
-                write!(f, " := {}", num)?;
-            }
-            Some(ParamDataBody::Symbolic(s)) => {
-                write!(f, " := \"{}\"", s)?;
-            }
-            None => {}
-        }
-        Ok(())
-    }
-}
-
 /// Constraint expression (e.g., "expr <= expr")
 #[derive(Clone, Debug)]
 pub struct ConstraintExpr {
@@ -677,12 +566,6 @@ impl ConstraintExpr {
     }
 }
 
-impl fmt::Display for ConstraintExpr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "<expr> {} <expr>", self.op)
-    }
-}
-
 /// Variable type
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum VarType {
@@ -699,16 +582,6 @@ impl VarType {
             "binary" => VarType::Binary,
             _ => VarType::Float,
         })
-    }
-}
-
-impl fmt::Display for VarType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            VarType::Float => write!(f, "float"),
-            VarType::Integer => write!(f, "integer"),
-            VarType::Binary => write!(f, "binary"),
-        }
     }
 }
 
@@ -733,17 +606,6 @@ impl ParamType {
     }
 }
 
-impl fmt::Display for ParamType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ParamType::Float => write!(f, "float"),
-            ParamType::Integer => write!(f, "integer"),
-            ParamType::Binary => write!(f, "binary"),
-            ParamType::Symbolic => write!(f, "symbolic"),
-        }
-    }
-}
-
 /// Objective sense
 #[derive(Clone, Copy, Debug)]
 pub enum ObjSense {
@@ -758,15 +620,6 @@ impl ObjSense {
             "maximize" => ObjSense::Maximize,
             _ => ObjSense::Minimize,
         })
-    }
-}
-
-impl fmt::Display for ObjSense {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ObjSense::Minimize => write!(f, "minimize"),
-            ObjSense::Maximize => write!(f, "maximize"),
-        }
     }
 }
 
@@ -794,12 +647,6 @@ impl VarBounds {
     }
 }
 
-impl fmt::Display for VarBounds {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}", self.op, self.value)
-    }
-}
-
 /// Parameter condition
 #[derive(Clone, Debug)]
 pub struct ParamCondition {
@@ -824,12 +671,6 @@ impl ParamCondition {
             op,
             value: value.context("missing param condition value")?,
         })
-    }
-}
-
-impl fmt::Display for ParamCondition {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} <value>", self.op)
     }
 }
 
@@ -883,29 +724,11 @@ impl ParamDataTable {
     }
 }
 
-impl fmt::Display for ParamDataTable {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.target.is_some() {
-            write!(f, " [<target>]")?;
-        }
-        write!(f, " {} cols, {} rows", self.cols.len(), self.rows.len())
-    }
-}
-
 /// Parameter data target
 #[derive(Clone, Debug)]
 pub enum ParamDataTarget {
     IndexVar(SetVal),
     Any,
-}
-
-impl fmt::Display for ParamDataTarget {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ParamDataTarget::IndexVar(s) => write!(f, "{}", s),
-            ParamDataTarget::Any => write!(f, "*"),
-        }
-    }
 }
 
 /// Parameter data row
@@ -951,12 +774,6 @@ impl ParamDataRow {
     }
 }
 
-impl fmt::Display for ParamDataRow {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} <{} values>", self.label, self.values.len())
-    }
-}
-
 // ==============================
 // ROOT ENTRY ENUM
 // ==============================
@@ -972,21 +789,6 @@ pub enum Entry {
     Check(Check),
     DataSet(SetData),
     DataParam(ParamData),
-}
-
-impl fmt::Display for Entry {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Entry::Var(v) => write!(f, "{}", v),
-            Entry::Param(p) => write!(f, "{}", p),
-            Entry::Set(s) => write!(f, "{}", s),
-            Entry::Objective(o) => write!(f, "{}", o),
-            Entry::Constraint(c) => write!(f, "{}", c),
-            Entry::Check(c) => write!(f, "{}", c),
-            Entry::DataSet(ds) => write!(f, "{}", ds),
-            Entry::DataParam(dp) => write!(f, "{}", dp),
-        }
-    }
 }
 
 /// Expression - recursive tree structure with proper operator precedence
@@ -1066,22 +868,6 @@ pub fn parse_expr(pairs: Pairs<Rule>) -> Result<Expr> {
             })
         })
         .parse(pairs)
-}
-
-impl fmt::Display for Expr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Expr::Number(n) => write!(f, "{}", n),
-            Expr::VarSubscripted(v) => write!(f, "{}", v),
-            Expr::FuncSum(func) => write!(f, "{}", **func),
-            Expr::FuncMin(func) => write!(f, "{}", **func),
-            Expr::FuncMax(func) => write!(f, "{}", **func),
-            Expr::FuncCard(func) => write!(f, "{}", **func),
-            Expr::Conditional(cond) => write!(f, "{}", **cond),
-            Expr::UnaryNeg(e) => write!(f, "-{}", **e),
-            Expr::BinOp { lhs, op, rhs } => write!(f, "({} {} {})", **lhs, op, **rhs),
-        }
-    }
 }
 
 /// Logical expression - recursive tree structure with proper operator precedence
@@ -1174,17 +960,6 @@ fn parse_logic_expr(pairs: Pairs<Rule>) -> Result<LogicExpr> {
         .parse(pairs)
 }
 
-impl fmt::Display for LogicExpr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            LogicExpr::Comparison { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
-            LogicExpr::Membership { op, .. } => write!(f, "(<tuple> {} <set>)", op),
-            LogicExpr::Subset { op, .. } => write!(f, "(<set> {} <set>)", op),
-            LogicExpr::BoolOp { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
-        }
-    }
-}
-
 /// Conditional expression (if-then-else)
 #[derive(Clone, Debug)]
 pub struct Conditional {
@@ -1218,16 +993,6 @@ impl Conditional {
             then_expr: then_expr.context("missing conditional then_expr")?,
             else_expr,
         })
-    }
-}
-
-impl fmt::Display for Conditional {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "if {} then {}", self.condition, self.then_expr)?;
-        if let Some(else_expr) = &self.else_expr {
-            write!(f, " else {}", else_expr)?;
-        }
-        Ok(())
     }
 }
 
@@ -1304,18 +1069,6 @@ impl Domain {
     }
 }
 
-impl fmt::Display for Domain {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{{")?;
-        let vars: Vec<_> = self.parts.iter().map(|p| p.var.to_string()).collect();
-        write!(f, "{}", vars.join(", "))?;
-        if self.condition.is_some() {
-            write!(f, ": <condition>")?;
-        }
-        write!(f, "}}")
-    }
-}
-
 /// Single domain part (e.g., "r in REGION")
 #[derive(Clone, Debug)]
 pub struct DomainPart {
@@ -1363,30 +1116,11 @@ impl DomainPart {
     }
 }
 
-impl fmt::Display for DomainPart {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} in {}", self.var, intern_resolve(self.set))
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum DomainPartVar {
     None,
     Single(Spur),
     Tuple(Vec<Spur>),
-}
-
-impl fmt::Display for DomainPartVar {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            DomainPartVar::None => write!(f, ""),
-            DomainPartVar::Single(s) => write!(f, "{}", intern_resolve(*s)),
-            DomainPartVar::Tuple(v) => {
-                let strs: Vec<&str> = v.iter().map(|s| intern_resolve(*s)).collect();
-                write!(f, "({})", strs.join(", "))
-            }
-        }
-    }
 }
 
 // ==============================
@@ -1422,21 +1156,6 @@ impl RelOp {
     }
 }
 
-impl fmt::Display for RelOp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            RelOp::Lt => write!(f, "<"),
-            RelOp::Le => write!(f, "<="),
-            RelOp::Eq => write!(f, "="),
-            RelOp::EqEq => write!(f, "=="),
-            RelOp::Ne => write!(f, "<>"),
-            RelOp::Ne2 => write!(f, "!="),
-            RelOp::Ge => write!(f, ">="),
-            RelOp::Gt => write!(f, ">"),
-        }
-    }
-}
-
 /// Mathematical operator
 #[derive(Clone, Copy, Debug)]
 pub enum MathOp {
@@ -1460,18 +1179,6 @@ impl MathOp {
     }
 }
 
-impl fmt::Display for MathOp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            MathOp::Add => write!(f, "+"),
-            MathOp::Sub => write!(f, "-"),
-            MathOp::Mul => write!(f, "*"),
-            MathOp::Div => write!(f, "/"),
-            MathOp::Pow => write!(f, "^"),
-        }
-    }
-}
-
 /// Membership operator (tuple in set)
 #[derive(Clone, Copy, Debug)]
 pub enum MemberOp {
@@ -1486,15 +1193,6 @@ impl MemberOp {
             "not in" | "!in" => MemberOp::NotIn,
             _ => bail!("Unexpected member_op: {}", entry.as_str()),
         })
-    }
-}
-
-impl fmt::Display for MemberOp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            MemberOp::In => write!(f, "in"),
-            MemberOp::NotIn => write!(f, "not in"),
-        }
     }
 }
 
@@ -1515,15 +1213,6 @@ impl SubsetOp {
     }
 }
 
-impl fmt::Display for SubsetOp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            SubsetOp::Within => write!(f, "within"),
-            SubsetOp::NotWithin => write!(f, "not within"),
-        }
-    }
-}
-
 /// Boolean operator
 #[derive(Clone, Debug)]
 pub enum BoolOp {
@@ -1538,15 +1227,6 @@ impl BoolOp {
             "or" | "||" => BoolOp::Or,
             _ => BoolOp::And,
         })
-    }
-}
-
-impl fmt::Display for BoolOp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            BoolOp::And => write!(f, "and"),
-            BoolOp::Or => write!(f, "or"),
-        }
     }
 }
 
@@ -1574,16 +1254,6 @@ impl VarSubscripted {
             var: var.context("missing var ref")?,
             subscript,
         })
-    }
-}
-
-impl fmt::Display for VarSubscripted {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", intern_resolve(self.var))?;
-        if !self.subscript.is_empty() {
-            write!(f, "[...]")?;
-        }
-        Ok(())
     }
 }
 
@@ -1749,23 +1419,6 @@ impl SubscriptPart {
     }
 }
 
-impl fmt::Display for SubscriptPart {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.var {
-            SubscriptPartVar::Var(s) | SubscriptPartVar::ValStr(s) => {
-                write!(f, "{}", intern_resolve(s))?;
-            }
-            SubscriptPartVar::ValInt(n) => {
-                write!(f, "{}", n)?;
-            }
-        }
-        if let Some(shift) = &self.shift {
-            write!(f, "{}", shift)?;
-        }
-        Ok(())
-    }
-}
-
 /// SubscriptPartVar (value or reference)
 #[derive(Clone, Copy, Debug)]
 pub enum SubscriptPartVar {
@@ -1792,26 +1445,11 @@ impl SubscriptShift {
     }
 }
 
-impl fmt::Display for SubscriptShift {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            SubscriptShift::Plus => write!(f, "+1"),
-            SubscriptShift::Minus => write!(f, "-1"),
-        }
-    }
-}
-
 /// Sum function (iterated sum over a domain)
 #[derive(Clone, Debug)]
 pub struct FuncSum {
     pub domain: Domain,
     pub operand: Box<Expr>,
-}
-
-impl fmt::Display for FuncSum {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "sum {} {}", self.domain, self.operand)
-    }
 }
 
 /// Min function
@@ -1839,12 +1477,6 @@ impl FuncMin {
             domain,
             var: var.context("missing func_min var")?,
         })
-    }
-}
-
-impl fmt::Display for FuncMin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "min <domain> min(<var>)")
     }
 }
 
@@ -1876,12 +1508,6 @@ impl FuncMax {
     }
 }
 
-impl fmt::Display for FuncMax {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "max <domain> max(<var>)")
-    }
-}
-
 /// Card function (cardinality of a set)
 #[derive(Clone, Debug)]
 pub struct FuncCard {
@@ -1906,15 +1532,5 @@ impl FuncCard {
             set: set.context("missing func_card set name")?,
             subscript,
         })
-    }
-}
-
-impl fmt::Display for FuncCard {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "card({})", intern_resolve(self.set))?;
-        if !self.subscript.is_empty() {
-            write!(f, "[...]")?;
-        }
-        Ok(())
     }
 }
