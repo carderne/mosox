@@ -11,7 +11,7 @@ use crate::{
         op::Bounds,
     },
     matrix::{
-        param::{Param, resolve_param},
+        param::{Param, create_param},
         set::SetCont,
     },
 };
@@ -52,7 +52,7 @@ impl Lookups {
                 .collect::<Result<_>>()?,
             par_map: pars
                 .into_iter()
-                .map(|param| (param.decl.name, resolve_param(param)))
+                .map(|param| (param.decl.name, create_param(param)))
                 .collect(),
         })
     }

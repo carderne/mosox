@@ -1,11 +1,10 @@
 use crate::ir::{
     BoolOp, Domain, DomainPart, DomainPartVar, Expr, Index, MathOp, RelOp, SetVal, SetValTerminal,
-    interner::intern_resolve,
 };
-use crate::ir::{LogicExpr, MemberOp, SetAtom, SetExpr, SubscriptPartVar, SubsetOp};
+use crate::ir::{LogicExpr, MemberOp, SetAtom, SetExpr, SubsetOp};
 use crate::matrix::lookup::Lookups;
-use crate::matrix::param::ParamVal;
-use crate::matrix::set::{concrete_index, resolve_set_expr};
+use crate::matrix::param::{Param, ParamVal};
+use crate::matrix::set::{concrete_index, idx_get, resolve_set_expr};
 use anyhow::{Context, Result, bail};
 use lasso::Spur;
 use smallvec::SmallVec;
@@ -29,26 +28,6 @@ pub enum Term {
 //                       index   index value
 pub type IdxValMap = SmallVec<[(Spur, SetVal); 8]>;
 
-// Helper function to get a value from IdxValMap
-pub fn idx_get(map: &IdxValMap, key: Spur) -> Result<SetVal> {
-    map.iter()
-        .find(|(k, _)| *k == key)
-        .map(|(_, v)| v)
-        .copied()
-        .with_context(|| {
-            let name = intern_resolve(key);
-            format!("No idx val at {name}")
-        })
-}
-
-pub fn idx_val_or_get(map: &IdxValMap, var: SubscriptPartVar) -> Result<SetVal> {
-    match var {
-        SubscriptPartVar::Var(var) => idx_get(map, var),
-        SubscriptPartVar::ValStr(val) => Ok(SetVal::Str(val)),
-        SubscriptPartVar::ValInt(val) => Ok(SetVal::Int(val)),
-    }
-}
-
 // Helper to extend one IdxValMap with another
 fn idx_extend(map: &mut IdxValMap, other: &IdxValMap) {
     for (k, v) in other.iter() {
@@ -58,12 +37,41 @@ fn idx_extend(map: &mut IdxValMap, other: &IdxValMap) {
     }
 }
 
+pub fn resolve_param(
+    param: &Param,
+    index: &Index,
+    idx_val_map: &IdxValMap,
+    lookups: &Lookups,
+) -> Result<Vec<Term>> {
+    match &param.data {
+        ParamVal::Scalar(num) => Ok(vec![Term::Num(*num)]),
+        ParamVal::Arr(arr) => {
+            if let Some(arr_val) = arr.get(index) {
+                Ok(vec![Term::Num(*arr_val)])
+            } else {
+                match &param.default {
+                    Some(expr) => recurse(expr, lookups, idx_val_map),
+                    None => bail!("tried to get uninitialized param"),
+                }
+            }
+        }
+        ParamVal::Expr(expr) => recurse(expr, lookups, idx_val_map),
+        ParamVal::None => match &param.default {
+            Some(expr) => recurse(expr, lookups, idx_val_map),
+            None => bail!("tried to get uninitialized param"),
+        },
+        ParamVal::Symbolic => {
+            bail!("symbolic params are not supported in constraint evaluation")
+        }
+    }
+}
+
 pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Result<Vec<Term>> {
     match expr {
         Expr::Number(num) => Ok(vec![Term::Num(*num)]),
         Expr::VarSubscripted(var_or_param) => {
             let name = &var_or_param.var;
-            let index = concrete_index(&var_or_param.subscript, idx_val_map)?;
+            let index = concrete_index(&var_or_param.subscript, idx_val_map, lookups)?;
 
             if lookups.var_map.contains_key(name) {
                 Ok(vec![Term::Pair(Pair {
@@ -72,27 +80,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Resul
                     var: *name,
                 })])
             } else if let Some(param) = lookups.par_map.get(name) {
-                match &param.data {
-                    ParamVal::Scalar(num) => Ok(vec![Term::Num(*num)]),
-                    ParamVal::Arr(arr) => {
-                        if let Some(arr_val) = arr.get(&index) {
-                            Ok(vec![Term::Num(*arr_val)])
-                        } else {
-                            match &param.default {
-                                Some(expr) => recurse(expr, lookups, idx_val_map),
-                                None => bail!("tried to get uninitialized param"),
-                            }
-                        }
-                    }
-                    ParamVal::Expr(expr) => recurse(expr, lookups, idx_val_map),
-                    ParamVal::None => match &param.default {
-                        Some(expr) => recurse(expr, lookups, idx_val_map),
-                        None => bail!("tried to get uninitialized param"),
-                    },
-                    ParamVal::Symbolic => {
-                        bail!("symbolic params are not supported in constraint evaluation")
-                    }
-                }
+                resolve_param(param, &index, idx_val_map, lookups)
             } else {
                 // Use the current index value (eg y=>2014) as an actual value
                 // Mostly (only?) used in domain condition expressions
@@ -359,7 +347,7 @@ fn expand_sum(
         .collect())
 }
 
-fn resolve_terms_to_num(terms: &[Term]) -> Result<Option<f64>> {
+pub fn resolve_terms_to_num(terms: &[Term]) -> Result<Option<f64>> {
     let mut sum = 0.0;
     for t in terms {
         match t {
@@ -486,7 +474,7 @@ fn eval_func_minmax(
         None => bail!("no parts in func min/max domain"),
         Some(set_domain) => match &set_domain.expr {
             SetExpr::Atom(SetAtom::Ref(set_domain)) => {
-                let index = concrete_index(&set_domain.subscript, idx_val_map)?;
+                let index = concrete_index(&set_domain.subscript, idx_val_map, lookups)?;
                 let resolved = lookups
                     .set_map
                     .get(&set_domain.spur)

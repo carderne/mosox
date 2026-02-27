@@ -65,7 +65,8 @@ set_atom        =  { domain | set_setof | set_arith | set_ref | ("(" ~ set_expr 
 set_ref         =  { id ~ subscript? }
 set_setof       =  { "setof" ~ domain ~ domain_var }
 set_arith       =  { set_arith_end ~ ".." ~ set_arith_end }
-set_arith_end   =  { int | (domain_set ~ subscript?) }
+set_arith_end   =  { int | (id ~ subscript?) | set_arith_fancy }
+set_arith_fancy =  { "(" ~ id ~ subscript? ~ (add | sub) ~ int ~ ")" }
 
 set_tuples       = { set_tuple+ }
 set_tuple        = { "(" ~ set_val ~ ("," ~ set_val)+ ~ ")" }
@@ -170,7 +171,6 @@ domain_part        =  { (domain_var ~ "in")? ~ set_expr }
 domain_var         =  { domain_var_single | domain_var_tuple }
 domain_var_single  = @{ id }
 domain_var_tuple   = { "(" ~ id ~ ("," ~ id)+ ~ ")" }
-domain_set         = @{ id }
 
 // Logical expression
 // Expressions that evaluate to true or false
@@ -185,11 +185,13 @@ logic_subset   =  { set_expr ~ subset_op ~ set_expr }
 logic_compound =  { "(" ~ logic_expr ~ ")" }
 
 // Subscripted var or param
-var_subscripted =  { var_ref ~ subscript? }
-var_ref         = @{ id }
+var_subscripted =  { id ~ subscript? }
 subscript       =  { "[" ~ subscript_part ~ ("," ~ subscript_part)* ~ "]" }
-subscript_part  =  { (id | int | string_literal) ~ subscript_shift? }
-subscript_shift =  { ("+" | "-") ~ "1" }
+// If the subscript part itself has a subscript, eg foo[bar[i]]
+// then bar must be a param. In theory with foo[bar], bar could also
+// be a param, but the code doesn't currently check if bar exists..
+subscript_part  =  { (var_subscripted | int | string_literal) ~ subscript_shift? }
+subscript_shift =  { (add | sub) ~ int }
 
 // Expression
 // Bundled up with string_literal as often that is also allowed

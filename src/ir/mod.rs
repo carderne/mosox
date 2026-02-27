@@ -410,11 +410,15 @@ impl SetArith {
     }
 }
 
-/// Endpoint of a set arithmetic range: either a bare integer or a named set with optional subscript
+/// Endpoint of a set arithmetic range: either a bare integer or a named set with optional subscript and shift
 #[derive(Clone, Debug)]
 pub enum SetArithEnd {
     Int(u32),
-    Named { name: Spur, subscript: Subscript },
+    Named {
+        name: Spur,
+        subscript: Subscript,
+        shift: Option<SubscriptShift>,
+    },
 }
 
 impl SetArithEnd {
@@ -426,8 +430,11 @@ impl SetArithEnd {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::int => int_val = Some(pair.as_str().parse()?),
-                Rule::domain_set => name = Some(intern(pair.as_str())),
+                Rule::id => name = Some(intern(pair.as_str())),
                 Rule::subscript => subscript = Subscript::from_entry(pair)?,
+                Rule::set_arith_fancy => {
+                    return Self::parse_fancy(pair);
+                }
                 _ => {}
             }
         }
@@ -438,8 +445,40 @@ impl SetArithEnd {
             Ok(SetArithEnd::Named {
                 name: name.context("missing set_arith_end name")?,
                 subscript,
+                shift: None,
             })
         }
+    }
+
+    fn parse_fancy(entry: Pair<Rule>) -> Result<Self> {
+        let mut name: Option<Spur> = None;
+        let mut subscript = Subscript::default();
+        let mut is_add = true;
+        let mut offset: Option<u32> = None;
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::id => name = Some(intern(pair.as_str())),
+                Rule::subscript => subscript = Subscript::from_entry(pair)?,
+                Rule::add => is_add = true,
+                Rule::sub => is_add = false,
+                Rule::int => offset = Some(pair.as_str().parse()?),
+                _ => {}
+            }
+        }
+
+        let offset = offset.context("missing set_arith_fancy offset")?;
+        let shift = if is_add {
+            SubscriptShift::Plus(offset)
+        } else {
+            SubscriptShift::Minus(offset)
+        };
+
+        Ok(SetArithEnd::Named {
+            name: name.context("missing set_arith_fancy name")?,
+            subscript,
+            shift: Some(shift),
+        })
     }
 }
 
@@ -1330,7 +1369,7 @@ impl VarSubscripted {
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::var_ref => var = Some(intern(pair.as_str())),
+                Rule::id => var = Some(intern(pair.as_str())),
                 Rule::subscript => subscript = Subscript::from_entry(pair)?,
                 _ => {}
             }
@@ -1476,7 +1515,7 @@ impl Subscript {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct SubscriptPart {
     pub var: SubscriptPartVar,
     pub shift: Option<SubscriptShift>,
@@ -1484,49 +1523,65 @@ pub struct SubscriptPart {
 
 impl SubscriptPart {
     pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
-        let mut var = SubscriptPartVar::Var(intern(""));
+        let mut var = None;
         let mut shift = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::id => var = SubscriptPartVar::Var(intern(pair.as_str())),
-                Rule::int => var = SubscriptPartVar::ValInt(pair.as_str().parse().unwrap()),
+                Rule::var_subscripted => {
+                    var = Some(SubscriptPartVar::Var(VarSubscripted::from_entry(pair)?));
+                }
+                Rule::int => var = Some(SubscriptPartVar::ValInt(pair.as_str().parse().unwrap())),
                 Rule::string_literal => {
                     let s = pair.as_str();
                     let s = &s[1..s.len() - 1]; // strip quotes
-                    var = SubscriptPartVar::ValStr(intern(s));
+                    var = Some(SubscriptPartVar::ValStr(intern(s)));
                 }
                 Rule::subscript_shift => shift = Some(SubscriptShift::from_entry(pair)?),
                 _ => {}
             }
         }
 
-        Ok(Self { var, shift })
+        Ok(Self {
+            var: var.context("missing subscript_part var")?,
+            shift,
+        })
     }
 }
 
 /// SubscriptPartVar (value or reference)
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum SubscriptPartVar {
-    Var(Spur),    // a variable from a domain, like i, j
-    ValStr(Spur), // a value from a set, eg `gas`
-    ValInt(u32),  // a value from a set, eg `4`
+    ValStr(Spur),        // a value from a set, eg `gas`
+    ValInt(u32),         // a value from a set, eg `4`
+    Var(VarSubscripted), // a var/param, possibly subscripted, eg `i` or `foo[i]`
 }
 
-/// Subscript shift (+1 or -1)
+/// Subscript shift (+n or -n)
 #[derive(Clone, Copy, Debug)]
 pub enum SubscriptShift {
-    Plus,
-    Minus,
+    Plus(u32),
+    Minus(u32),
 }
 
 impl SubscriptShift {
     pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
-        let s = entry.as_str();
-        Ok(if s.starts_with('+') {
-            SubscriptShift::Plus
+        let mut is_add = true;
+        let mut val: u32 = 1;
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::add => is_add = true,
+                Rule::sub => is_add = false,
+                Rule::int => val = pair.as_str().parse().unwrap_or(1),
+                _ => {}
+            }
+        }
+
+        Ok(if is_add {
+            SubscriptShift::Plus(val)
         } else {
-            SubscriptShift::Minus
+            SubscriptShift::Minus(val)
         })
     }
 }

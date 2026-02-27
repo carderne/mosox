@@ -15,7 +15,7 @@ pub enum ParamVal {
     None,
 }
 
-pub fn resolve_param(param: ParamWithData) -> Param {
+pub fn create_param(param: ParamWithData) -> Param {
     let default = resolve_param_default(&param);
     if let Some(data) = param.data
         && let Some(body) = data.body

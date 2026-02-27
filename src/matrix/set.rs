@@ -1,9 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ir::{
-    SetArith, SetArithEnd, SetAtom, SetInfixOp, Subscript, SubscriptShift, interner::intern_resolve
+use crate::{
+    ir::{
+        SetArith, SetArithEnd, SetAtom, SetInfixOp, Subscript, SubscriptPartVar, SubscriptShift,
+        interner::intern_resolve,
+    },
+    matrix::constraint::{resolve_param, resolve_terms_to_num},
 };
 use anyhow::{Context, Result, bail};
+use lasso::Spur;
 
 use crate::{
     ir::{
@@ -11,7 +16,7 @@ use crate::{
         SetVals, SetValue, model::SetWithData,
     },
     matrix::{
-        constraint::{IdxValMap, domain_to_indexes, get_index_map, idx_get, idx_val_or_get},
+        constraint::{IdxValMap, domain_to_indexes, get_index_map},
         lookup::Lookups,
     },
 };
@@ -44,7 +49,7 @@ impl SetCont {
     pub fn resolve(&self, index: &Index, lookups: &Lookups) -> Result<SetVals> {
         // Data takes preference over expressions (probably)
         if let Some(set_data) = self.data.get(index) {
-            // Should also check that the within/cross conditions are met!
+            // TODO Should also check that the within/cross conditions are met!
             return Ok(set_data.clone());
         }
 
@@ -91,7 +96,7 @@ fn resolve_set_atom(expr: &SetAtom, idx_val_map: &IdxValMap, lookups: &Lookups) 
         }
         SetAtom::SetOf(set_of) => resolve_set_of(set_of, idx_val_map, lookups),
         SetAtom::Ref(SetRef { spur, subscript }) => {
-            let index = concrete_index(subscript, idx_val_map)?;
+            let index = concrete_index(subscript, idx_val_map, lookups)?;
             lookups.set_map.get(spur).unwrap().resolve(&index, lookups)
         }
         SetAtom::Arith(arith) => resolve_set_arith(arith, idx_val_map, lookups),
@@ -214,28 +219,33 @@ pub fn resolve_set_arith(
 fn resolve_range_end(end: &SetArithEnd, idx_val_map: &IdxValMap, lookups: &Lookups) -> Result<u32> {
     match end {
         SetArithEnd::Int(n) => Ok(*n),
-        SetArithEnd::Named { name, subscript } => {
-            // Build the concrete index from the subscript parts
-            let index: Index = subscript
-                .iter()
-                .map(|part| idx_val_or_get(idx_val_map, part.var))
-                .collect::<Result<Vec<_>>>()?
-                .into();
+        SetArithEnd::Named {
+            name,
+            subscript,
+            shift,
+        } => {
+            let index = concrete_index(subscript, idx_val_map, lookups)?;
 
             // Look up as a param — range ends must be scalar integers
             let param = lookups.par_map.get(name).with_context(|| {
                 format!("range end '{}' not found in params", intern_resolve(*name))
             })?;
 
-            let val = match &param.data {
+            let base = match &param.data {
                 crate::matrix::param::ParamVal::Scalar(n) => *n,
                 crate::matrix::param::ParamVal::Arr(arr) => *arr
                     .get(&index)
                     .context("no value at index for range end param")?,
                 _ => bail!("range end param must be a numeric scalar or array"),
-            };
+            } as u32;
 
-            Ok(val as u32)
+            match shift {
+                Some(shift) => match shift {
+                    SubscriptShift::Plus(offset) => Ok(base + offset),
+                    SubscriptShift::Minus(offset) => Ok(base - offset),
+                },
+                None => Ok(base),
+            }
         }
     }
 }
@@ -251,23 +261,62 @@ fn union<T: Eq + std::hash::Hash>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
     set.into_iter().collect()
 }
 
+// Helper function to get a value from IdxValMap
+pub fn idx_get(map: &IdxValMap, key: Spur) -> Result<SetVal> {
+    map.iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, v)| v)
+        .copied()
+        .with_context(|| {
+            let name = intern_resolve(key);
+            format!("No idx val at {name}")
+        })
+}
+
+fn idx_val_or_get(var: &SubscriptPartVar, map: &IdxValMap, lookups: &Lookups) -> Result<SetVal> {
+    match var {
+        SubscriptPartVar::ValStr(val) => Ok(SetVal::Str(*val)),
+        SubscriptPartVar::ValInt(val) => Ok(SetVal::Int(*val)),
+        SubscriptPartVar::Var(inner) => match idx_get(map, inner.var) {
+            // No way to know without checking whether the reference is to an index value or a
+            // param. Eg MyParam[i, foo, bar[qux]]
+            // i is probably an index, foo could be anything, bar definitely a param
+            Ok(val) => Ok(val),
+            Err(err) => match lookups.par_map.get(&inner.var) {
+                Some(param) => {
+                    let index = concrete_index(&inner.subscript, map, lookups)?;
+                    let terms = resolve_param(param, &index, map, lookups)?;
+                    let num = resolve_terms_to_num(&terms)?
+                        .context("cannot reference variables inside subscript")?;
+                    Ok(SetVal::Int(num as u32))
+                }
+                None => Err(err),
+            },
+        },
+    }
+}
+
 /// Convert from symbolic ("dummy" in GMPL parlance) subscript
 /// to actual indexable values
-pub fn concrete_index(subscript: &Subscript, idx_val_map: &IdxValMap) -> Result<Index> {
+pub fn concrete_index(
+    subscript: &Subscript,
+    idx_val_map: &IdxValMap,
+    lookups: &Lookups,
+) -> Result<Index> {
     Ok(subscript
         .iter()
         .map(|i| {
             // First try to look up as a domain variable
             // If not found, check if it's a literal number
-            let index_val = idx_val_or_get(idx_val_map, i.var)?;
+            let index_val = idx_val_or_get(&i.var, idx_val_map, lookups)?;
             match &i.shift {
                 Some(shift) => match index_val {
                     SetVal::Str(_) => {
                         bail!("tried to index shift on string index val")
                     }
                     SetVal::Int(index_num) => match shift {
-                        SubscriptShift::Plus => Ok(SetVal::Int(index_num + 1)),
-                        SubscriptShift::Minus => Ok(SetVal::Int(index_num - 1)),
+                        SubscriptShift::Plus(offset) => Ok(SetVal::Int(index_num + offset)),
+                        SubscriptShift::Minus(offset) => Ok(SetVal::Int(index_num - offset)),
                     },
                     SetVal::Tuple(_) => {
                         bail!("tuple set not allowed in var subscript")
