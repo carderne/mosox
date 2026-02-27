@@ -1,13 +1,12 @@
 use crate::ir::{
     BoolOp, Domain, DomainPart, DomainPartVar, Expr, Index, MathOp, RelOp, SetVal, SetValTerminal,
-    Subscript, SubscriptShift, interner::intern_resolve,
+    interner::intern_resolve,
 };
-use crate::ir::{DomainPartExpr, DomainRangeEnd, LogicExpr, MemberOp, SubscriptPartVar, SubsetOp};
+use crate::ir::{LogicExpr, MemberOp, SetAtom, SetExpr, SubscriptPartVar, SubsetOp};
 use crate::matrix::lookup::Lookups;
 use crate::matrix::param::ParamVal;
-use crate::matrix::set::{resolve_domain_range, resolve_set_expr};
+use crate::matrix::set::{concrete_index, resolve_set_expr};
 use anyhow::{Context, Result, bail};
-use itertools::Itertools;
 use lasso::Spur;
 use smallvec::SmallVec;
 
@@ -64,8 +63,6 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Resul
         Expr::Number(num) => Ok(vec![Term::Num(*num)]),
         Expr::VarSubscripted(var_or_param) => {
             let name = &var_or_param.var;
-            // Need to convert from symbolic subscript references
-            // to concrete index values
             let index = concrete_index(&var_or_param.subscript, idx_val_map)?;
 
             if lookups.var_map.contains_key(name) {
@@ -116,12 +113,7 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Resul
             Ok(vec![Term::Num(val)])
         }
         Expr::FuncCard(func) => {
-            let set_cont = lookups
-                .set_map
-                .get(&func.set)
-                .with_context(|| format!("card(): unknown set '{}'", intern_resolve(func.set)))?;
-            let index = concrete_index(&func.subscript, idx_val_map)?;
-            let resolved = set_cont.resolve(&index, lookups)?;
+            let resolved = resolve_set_expr(&func.expr, idx_val_map, lookups)?;
             Ok(vec![Term::Num(resolved.len() as f64)])
         }
         Expr::Conditional(conditional) => {
@@ -236,44 +228,7 @@ pub fn domain_to_indexes(
 ) -> Result<Vec<Index>> {
     let Domain { parts, condition } = domain;
 
-    let all_simple = parts.iter().all(|part| match &part.expr {
-        DomainPartExpr::Set(set) => set.subscript.is_empty(),
-        DomainPartExpr::Range(range) => {
-            let lo_simple = match &range.lo {
-                DomainRangeEnd::Int(_) => true,
-                DomainRangeEnd::Named { name: _, subscript } => subscript.is_empty(),
-            };
-            let hi_simple = match &range.hi {
-                DomainRangeEnd::Int(_) => true,
-                DomainRangeEnd::Named { name: _, subscript } => subscript.is_empty(),
-            };
-            lo_simple && hi_simple
-        }
-    });
-
-    let cartesian: Box<dyn Iterator<Item = Vec<SetVal>>> = if all_simple {
-        Box::new(
-            parts
-                .iter()
-                .map(|part| -> Result<Vec<SetVal>> {
-                    let concrete_idx: Index = vec![].into();
-                    match &part.expr {
-                        DomainPartExpr::Set(part) => Ok(lookups
-                            .set_map
-                            .get(&part.set)
-                            .unwrap()
-                            .resolve(&concrete_idx, lookups)?
-                            .0),
-                        DomainPartExpr::Range(range) => {
-                            Ok(resolve_domain_range(range, idx_val_map, lookups)?.0)
-                        }
-                    }
-                })
-                .collect::<Result<Vec<_>>>()?
-                .into_iter()
-                .multi_cartesian_product(),
-        )
-    } else {
+    let cartesian: Box<dyn Iterator<Item = Vec<SetVal>>> = {
         // GMPL has a degenerate feature where in a domain expression like
         // { a in A, b in B[a] }
         // a later indexed set can refer to a set value from another one
@@ -289,34 +244,14 @@ pub fn domain_to_indexes(
                         let mut idx_map = get_index_map(parts, &existing)?;
                         idx_extend(&mut idx_map, idx_val_map);
 
-                        match &part.expr {
-                            DomainPartExpr::Set(part) => {
-                                let concrete_idx = concrete_index(&part.subscript, &idx_map)?;
-
-                                Ok(lookups
-                                    .set_map
-                                    .get(&part.set)
-                                    .unwrap()
-                                    .resolve(&concrete_idx, lookups)?
-                                    .iter()
-                                    .map(|val| {
-                                        let mut new_idx = existing.clone();
-                                        new_idx.push(*val);
-                                        new_idx
-                                    })
-                                    .collect::<Vec<_>>())
-                            }
-                            DomainPartExpr::Range(range) => {
-                                Ok(resolve_domain_range(range, &idx_map, lookups)?
-                                    .iter()
-                                    .map(|val| {
-                                        let mut new_idx = existing.clone();
-                                        new_idx.push(*val);
-                                        new_idx
-                                    })
-                                    .collect::<Vec<_>>())
-                            }
-                        }
+                        Ok(resolve_set_expr(&part.expr, &idx_map, lookups)?
+                            .iter()
+                            .map(|val| {
+                                let mut new_idx = existing.clone();
+                                new_idx.push(*val);
+                                new_idx
+                            })
+                            .collect::<Vec<_>>())
                     })
                     .collect::<Result<Vec<_>>>()?
                     .into_iter()
@@ -548,22 +483,15 @@ fn eval_func_minmax(
         bail!("min/max func can only operate on one dimension");
     }
     match domain.parts.first() {
+        None => bail!("no parts in func min/max domain"),
         Some(set_domain) => match &set_domain.expr {
-            DomainPartExpr::Range(_) => {
-                bail!("cannot use min/max func with arithmetic set expression")
-            }
-            DomainPartExpr::Set(set_domain) => {
-                let concrete_set_keys: Index = set_domain
-                    .subscript
-                    .iter()
-                    .map(|k| idx_val_or_get(idx_val_map, k.var))
-                    .collect::<Result<Vec<_>>>()?
-                    .into();
+            SetExpr::Atom(SetAtom::Ref(set_domain)) => {
+                let index = concrete_index(&set_domain.subscript, idx_val_map)?;
                 let resolved = lookups
                     .set_map
-                    .get(&set_domain.set)
+                    .get(&set_domain.spur)
                     .unwrap()
-                    .resolve(&concrete_set_keys, lookups)?;
+                    .resolve(&index, lookups)?;
 
                 let val = resolved
                     .iter()
@@ -581,8 +509,8 @@ fn eval_func_minmax(
                     .context("empty set for min/max")?;
                 Ok(val as f64)
             }
+            _ => bail!("TODO"),
         },
-        None => bail!("no parts in func min/max domain"),
     }
 }
 
@@ -599,31 +527,4 @@ fn negate_terms(terms: Vec<Term>) -> Result<Vec<Term>> {
             })),
         })
         .collect()
-}
-
-fn concrete_index(susbcript: &Subscript, idx_val_map: &IdxValMap) -> Result<Index> {
-    Ok(susbcript
-        .iter()
-        .map(|i| {
-            // First try to look up as a domain variable
-            // If not found, check if it's a literal number
-            let index_val = idx_val_or_get(idx_val_map, i.var)?;
-            match &i.shift {
-                Some(shift) => match index_val {
-                    SetVal::Str(_) => {
-                        bail!("tried to index shift on string index val")
-                    }
-                    SetVal::Int(index_num) => match shift {
-                        SubscriptShift::Plus => Ok(SetVal::Int(index_num + 1)),
-                        SubscriptShift::Minus => Ok(SetVal::Int(index_num - 1)),
-                    },
-                    SetVal::Tuple(_) => {
-                        bail!("tuple set not allowed in var subscript")
-                    }
-                },
-                None => Ok(index_val),
-            }
-        })
-        .collect::<Result<Vec<_>>>()?
-        .into())
 }

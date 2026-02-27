@@ -164,7 +164,7 @@ It is intended that all of these will ultimately be supported, and most of them 
 - These arithmetic operators: `less`, `div`, `mod`
 - These symbolic operators: `&` (string concatenation)
 - These set expressions: conditional set expressions, parenthesized set expressions
-- These set operators: `union`, `diff`, `symdiff`.
+- These set operators: `diff`, `symdiff`.
 - These logical iterated expressions: `forall`, `exists`
 - These logical operators: `not`
 

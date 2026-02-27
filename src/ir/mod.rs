@@ -33,6 +33,12 @@ static LOGIC_PRATT: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
         .op(Op::infix(Rule::bool_and, Left))
 });
 
+static SET_PRATT: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
+    PrattParser::new()
+        // inter and union at the same precedence level (no ordering defined)
+        .op(Op::infix(Rule::set_infix_op, Left))
+});
+
 // ==============================
 // ROOT RULES
 // ==============================
@@ -245,70 +251,92 @@ impl Set {
 
 #[derive(Clone, Debug)]
 pub enum SetExpr {
-    Domain(Domain),
-    SetMath(SetMath),
-    SetOf(SetOf),
-    Ref(SetRef),
+    /// A bare set atom: domain, setof, arith range, or set ref
+    Atom(SetAtom),
+    /// Binary inter/union: `lhs inter rhs`, `lhs union rhs`
+    InfixOp {
+        lhs: Box<SetExpr>,
+        op: SetInfixOp,
+        rhs: Box<SetExpr>,
+    },
 }
 
 impl SetExpr {
     pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
-        let inner = entry.into_inner().next().context("empty set_expr")?;
-        Ok(match inner.as_rule() {
-            Rule::domain => SetExpr::Domain(Domain::from_entry(inner)?),
-            Rule::set_inter => SetExpr::SetMath(SetMath::from_entry(inner)?),
-            Rule::set_setof => SetExpr::SetOf(SetOf::from_entry(inner)?),
-            Rule::set_ref => SetExpr::Ref(SetRef::from_entry(inner)?),
-            _ => bail!("Unexpected rule in set_expr: {:?}", inner.as_rule()),
-        })
+        parse_set_expr(entry.into_inner())
     }
+}
+
+fn parse_set_expr(pairs: Pairs<Rule>) -> Result<SetExpr> {
+    SET_PRATT
+        .map_primary(|primary| match primary.as_rule() {
+            Rule::set_atom => {
+                let inner = primary.into_inner().next().context("empty set_atom")?;
+                Ok(SetExpr::Atom(match inner.as_rule() {
+                    Rule::domain => SetAtom::Domain(Domain::from_entry(inner)?),
+                    Rule::set_setof => SetAtom::SetOf(SetOf::from_entry(inner)?),
+                    Rule::set_arith => SetAtom::Arith(SetArith::from_entry(inner)?),
+                    Rule::set_ref => SetAtom::Ref(SetRef::from_entry(inner)?),
+                    Rule::set_expr => return parse_set_expr(inner.into_inner()),
+                    rule => bail!("Unexpected rule in set_atom: {:?}", rule),
+                }))
+            }
+            rule => bail!("Expected set_atom primary, found {:?}", rule),
+        })
+        .map_infix(|lhs, op, rhs| {
+            let op = match op.as_str() {
+                "inter" => SetInfixOp::Inter,
+                "union" => SetInfixOp::Union,
+                s => bail!("Unexpected set_infix_op: {}", s),
+            };
+            Ok(SetExpr::InfixOp {
+                lhs: Box::new(lhs?),
+                op,
+                rhs: Box::new(rhs?),
+            })
+        })
+        .parse(pairs)
+}
+
+/// A leaf node in a set expression
+#[derive(Clone, Debug)]
+pub enum SetAtom {
+    Domain(Domain),
+    SetOf(SetOf),
+    Arith(SetArith),
+    Ref(SetRef),
+}
+
+/// Inter or union operator
+#[derive(Clone, Copy, Debug)]
+pub enum SetInfixOp {
+    Inter,
+    Union,
 }
 
 #[derive(Clone, Debug)]
 pub struct SetRef {
     pub spur: Spur,
-    pub index: Index,
+    pub subscript: Subscript,
 }
 
 impl SetRef {
     pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut spur = None;
-        let mut index = smallvec![];
+        let mut subscript = Subscript::default();
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::id => spur = Some(intern(pair.as_str())),
-                Rule::index => {
-                    for inner in pair.into_inner() {
-                        if inner.as_rule() == Rule::set_val {
-                            index.push(SetVal::from_entry(inner)?);
-                        }
-                    }
-                }
+                Rule::subscript => subscript = Subscript::from_entry(pair)?,
                 _ => {}
             }
         }
 
         Ok(Self {
             spur: spur.context("missing set ref id")?,
-            index,
+            subscript,
         })
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct SetMath {
-    pub intersection: Vec<VarSubscripted>,
-}
-
-impl SetMath {
-    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
-        let intersection = entry
-            .into_inner()
-            .filter(|p| p.as_rule() == Rule::var_subscripted)
-            .map(VarSubscripted::from_entry)
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Self { intersection })
     }
 }
 
@@ -349,6 +377,69 @@ impl SetOf {
             domain: domain.context("missing setof domain")?,
             integrand,
         })
+    }
+}
+
+/// Arithmetic range set: `lo..hi`
+#[derive(Clone, Debug)]
+pub struct SetArith {
+    pub lo: SetArithEnd,
+    pub hi: SetArithEnd,
+}
+
+impl SetArith {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        let mut lo: Option<SetArithEnd> = None;
+        let mut hi: Option<SetArithEnd> = None;
+
+        for pair in entry.into_inner() {
+            if pair.as_rule() == Rule::set_arith_end {
+                let end = SetArithEnd::from_entry(pair)?;
+                if lo.is_none() {
+                    lo = Some(end);
+                } else {
+                    hi = Some(end);
+                }
+            }
+        }
+
+        Ok(Self {
+            lo: lo.context("missing set_arith lower bound")?,
+            hi: hi.context("missing set_arith upper bound")?,
+        })
+    }
+}
+
+/// Endpoint of a set arithmetic range: either a bare integer or a named set with optional subscript
+#[derive(Clone, Debug)]
+pub enum SetArithEnd {
+    Int(u32),
+    Named { name: Spur, subscript: Subscript },
+}
+
+impl SetArithEnd {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        let mut int_val: Option<u32> = None;
+        let mut name: Option<Spur> = None;
+        let mut subscript = Subscript::default();
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::int => int_val = Some(pair.as_str().parse()?),
+                Rule::domain_set => name = Some(intern(pair.as_str())),
+                Rule::subscript => subscript = Subscript::from_entry(pair)?,
+                _ => {}
+            }
+        }
+
+        if let Some(n) = int_val {
+            Ok(SetArithEnd::Int(n))
+        } else {
+            Ok(SetArithEnd::Named {
+                name: name.context("missing set_arith_end name")?,
+                subscript,
+            })
+        }
     }
 }
 
@@ -1026,6 +1117,7 @@ impl SetVal {
     }
 }
 
+// TODO remove these display
 impl fmt::Display for SetVal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -1073,7 +1165,7 @@ impl Domain {
 #[derive(Clone, Debug)]
 pub struct DomainPart {
     pub var: DomainPartVar,
-    pub expr: DomainPartExpr,
+    pub expr: SetExpr,
 }
 
 impl DomainPart {
@@ -1098,12 +1190,7 @@ impl DomainPart {
                         _ => bail!("unexpected domain_var variant: {:?}", inner.as_rule()),
                     };
                 }
-                Rule::domain_part_set => {
-                    expr = Some(DomainPartExpr::Set(DomainPartSet::from_entry(pair)?))
-                }
-                Rule::domain_part_range => {
-                    expr = Some(DomainPartExpr::Range(DomainPartRange::from_entry(pair)?))
-                }
+                Rule::set_expr => expr = Some(SetExpr::from_entry(pair)?),
                 _ => {}
             }
         }
@@ -1112,109 +1199,6 @@ impl DomainPart {
             var,
             expr: expr.context("missing domain_part expr")?,
         })
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum DomainPartExpr {
-    /// `(var in)? SET[subscript]`  — e.g. `r in REGION`, `TECH`
-    Set(DomainPartSet),
-    /// `(var in)? lo..hi`          — e.g. `1..NbYears`, `1..NbSeasons[y]`
-    Range(DomainPartRange),
-}
-
-/// Set-membership domain part: `(var in)? SET[subscript]`
-#[derive(Clone, Debug)]
-pub struct DomainPartSet {
-    pub set: Spur,
-    pub subscript: Subscript,
-}
-
-impl DomainPartSet {
-    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
-        let mut subscript = Subscript::default();
-        let mut set: Option<Spur> = None;
-
-        for pair in entry.into_inner() {
-            match pair.as_rule() {
-                Rule::subscript => subscript = Subscript::from_entry(pair)?,
-                Rule::domain_set => set = Some(intern(pair.as_str())),
-                _ => {}
-            }
-        }
-
-        Ok(Self {
-            subscript,
-            set: set.context("missing domain set")?,
-        })
-    }
-}
-
-/// Range domain part: `(var in)? lo..hi`
-#[derive(Clone, Debug)]
-pub struct DomainPartRange {
-    pub lo: DomainRangeEnd,
-    pub hi: DomainRangeEnd,
-}
-
-impl DomainPartRange {
-    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
-        // domain_part_range = { (domain_var ~ "in")? ~ domain_range_end ~ ".." ~ domain_range_end }
-        // domain_range_end  = { int | (domain_set ~ subscript?) }
-        let mut lo: Option<DomainRangeEnd> = None;
-        let mut hi: Option<DomainRangeEnd> = None;
-
-        for pair in entry.into_inner() {
-            if pair.as_rule() == Rule::domain_range_end {
-                let end = DomainRangeEnd::from_entry(pair)?;
-                if lo.is_none() {
-                    lo = Some(end);
-                } else {
-                    hi = Some(end);
-                }
-            }
-        }
-
-        Ok(Self {
-            lo: lo.context("missing range lower bound")?,
-            hi: hi.context("missing range upper bound")?,
-        })
-    }
-}
-
-/// Range endpoint: either a bare integer or a named set with an optional subscript
-#[derive(Clone, Debug)]
-pub enum DomainRangeEnd {
-    /// A literal integer, e.g. `1`
-    Int(u32),
-    /// A named value (set reference) with optional subscript, e.g. `NbYears` or `NbSeasons[y]`
-    Named { name: Spur, subscript: Subscript },
-}
-
-impl DomainRangeEnd {
-    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
-        // domain_range_end = { int | (domain_set ~ subscript?) }
-        let mut int_val: Option<u32> = None;
-        let mut name: Option<Spur> = None;
-        let mut subscript = Subscript::default();
-
-        for pair in entry.into_inner() {
-            match pair.as_rule() {
-                Rule::int => int_val = Some(pair.as_str().parse()?),
-                Rule::domain_set => name = Some(intern(pair.as_str())),
-                Rule::subscript => subscript = Subscript::from_entry(pair)?,
-                _ => {}
-            }
-        }
-
-        if let Some(n) = int_val {
-            Ok(DomainRangeEnd::Int(n))
-        } else {
-            Ok(DomainRangeEnd::Named {
-                name: name.context("missing domain_range_end name")?,
-                subscript,
-            })
-        }
     }
 }
 
@@ -1613,26 +1597,17 @@ impl FuncMax {
 /// Card function (cardinality of a set)
 #[derive(Clone, Debug)]
 pub struct FuncCard {
-    pub set: Spur,
-    pub subscript: Subscript,
+    pub expr: SetExpr,
 }
 
 impl FuncCard {
     pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
-        let mut set = None;
-        let mut subscript = Subscript::default();
-
-        for pair in entry.into_inner() {
-            match pair.as_rule() {
-                Rule::func_var => set = Some(intern(pair.as_str())),
-                Rule::subscript => subscript = Subscript::from_entry(pair)?,
-                _ => {}
-            }
-        }
-
+        let inner = entry
+            .into_inner()
+            .next()
+            .context("missing func_card set_expr")?;
         Ok(Self {
-            set: set.context("missing func_card set name")?,
-            subscript,
+            expr: SetExpr::from_entry(inner)?,
         })
     }
 }

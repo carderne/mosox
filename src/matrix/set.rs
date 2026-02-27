@@ -1,12 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::ir::interner::intern_resolve;
+use crate::ir::{
+    SetArith, SetArithEnd, SetAtom, SetInfixOp, Subscript, SubscriptShift, interner::intern_resolve
+};
 use anyhow::{Context, Result, bail};
 
 use crate::{
     ir::{
-        self, DomainPartRange, DomainPartVar, DomainRangeEnd, Index, SetData, SetExpr, SetOf,
-        SetRef, SetVal, SetValTerminal, SetVals, SetValue, model::SetWithData,
+        self, DomainPartVar, Index, SetData, SetExpr, SetOf, SetRef, SetVal, SetValTerminal,
+        SetVals, SetValue, model::SetWithData,
     },
     matrix::{
         constraint::{IdxValMap, domain_to_indexes, get_index_map, idx_get, idx_val_or_get},
@@ -74,15 +76,11 @@ impl SetCont {
     }
 }
 
-pub fn resolve_set_expr(
-    expr: &SetExpr,
-    idx_val_map: &IdxValMap,
-    lookups: &Lookups,
-) -> Result<SetVals> {
+fn resolve_set_atom(expr: &SetAtom, idx_val_map: &IdxValMap, lookups: &Lookups) -> Result<SetVals> {
     match expr {
         // This is using a Set domain expression to actually build the values for the set,
         // rather than "get" them from one or more sets
-        SetExpr::Domain(domain) => {
+        SetAtom::Domain(domain) => {
             Ok(domain_to_indexes(domain, lookups, idx_val_map)?
                 .iter()
                 // TODO we're handling only the special case of a single dimension
@@ -91,31 +89,29 @@ pub fn resolve_set_expr(
                 .collect::<Vec<_>>()
                 .into())
         }
-        SetExpr::SetMath(set_math) => {
-            let sets: Vec<Vec<SetVal>> = set_math
-                .intersection
-                .iter()
-                .map(|v| -> Result<Vec<SetVal>> {
-                    let index_concrete: Index = v
-                        .subscript
-                        .iter()
-                        .map(|i| idx_val_or_get(idx_val_map, i.var))
-                        .collect::<Result<Vec<_>>>()?
-                        .into();
-                    Ok(lookups
-                        .set_map
-                        .get(&v.var)
-                        .unwrap()
-                        .resolve(&index_concrete, lookups)?
-                        .0)
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            Ok(intersect(sets).into())
+        SetAtom::SetOf(set_of) => resolve_set_of(set_of, idx_val_map, lookups),
+        SetAtom::Ref(SetRef { spur, subscript }) => {
+            let index = concrete_index(subscript, idx_val_map)?;
+            lookups.set_map.get(spur).unwrap().resolve(&index, lookups)
         }
-        SetExpr::SetOf(set_of) => resolve_set_of(set_of, idx_val_map, lookups),
-        SetExpr::Ref(SetRef { spur, index }) => {
-            lookups.set_map.get(spur).unwrap().resolve(index, lookups)
+        SetAtom::Arith(arith) => resolve_set_arith(arith, idx_val_map, lookups),
+    }
+}
+
+pub fn resolve_set_expr(
+    expr: &SetExpr,
+    idx_val_map: &IdxValMap,
+    lookups: &Lookups,
+) -> Result<SetVals> {
+    match expr {
+        SetExpr::Atom(atom) => resolve_set_atom(atom, idx_val_map, lookups),
+        SetExpr::InfixOp { lhs, op, rhs } => {
+            let lhs = resolve_set_expr(lhs, idx_val_map, lookups)?.0;
+            let rhs = resolve_set_expr(rhs, idx_val_map, lookups)?.0;
+            match op {
+                SetInfixOp::Inter => Ok(intersect(lhs, rhs).into()),
+                SetInfixOp::Union => Ok(union(lhs, rhs).into()),
+            }
         }
     }
 }
@@ -204,25 +200,21 @@ fn resolve_set_of(set_of: &SetOf, idx_val_map: &IdxValMap, lookups: &Lookups) ->
 
 /// Resolve a `DomainPartRange` (e.g. `1..NbYears` or `1..NbSeasons[y]`) to the sequence of
 /// integer `SetVal`s it represents: `[lo, lo+1, ..., hi]` inclusive.
-pub fn resolve_domain_range(
-    range: &DomainPartRange,
+pub fn resolve_set_arith(
+    arith: &SetArith,
     idx_val_map: &IdxValMap,
     lookups: &Lookups,
 ) -> Result<SetVals> {
-    let lo = resolve_range_end(&range.lo, idx_val_map, lookups)?;
-    let hi = resolve_range_end(&range.hi, idx_val_map, lookups)?;
+    let lo = resolve_range_end(&arith.lo, idx_val_map, lookups)?;
+    let hi = resolve_range_end(&arith.hi, idx_val_map, lookups)?;
     Ok((lo..=hi).map(SetVal::Int).collect::<Vec<_>>().into())
 }
 
 /// Resolve a single range endpoint to a concrete `u32`.
-fn resolve_range_end(
-    end: &DomainRangeEnd,
-    idx_val_map: &IdxValMap,
-    lookups: &Lookups,
-) -> Result<u32> {
+fn resolve_range_end(end: &SetArithEnd, idx_val_map: &IdxValMap, lookups: &Lookups) -> Result<u32> {
     match end {
-        DomainRangeEnd::Int(n) => Ok(*n),
-        DomainRangeEnd::Named { name, subscript } => {
+        SetArithEnd::Int(n) => Ok(*n),
+        SetArithEnd::Named { name, subscript } => {
             // Build the concrete index from the subscript parts
             let index: Index = subscript
                 .iter()
@@ -248,14 +240,42 @@ fn resolve_range_end(
     }
 }
 
-fn intersect<T: Eq + std::hash::Hash + Clone>(vecs: Vec<Vec<T>>) -> Vec<T> {
-    let mut iter = vecs.into_iter();
-    let mut result: HashSet<T> = iter.next().unwrap_or_default().into_iter().collect();
+fn intersect<T: Eq + std::hash::Hash + Clone>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
+    let set: HashSet<T> = b.into_iter().collect();
+    a.into_iter().filter(|x| set.contains(x)).collect()
+}
 
-    for v in iter {
-        let set: HashSet<T> = v.into_iter().collect();
-        result.retain(|x| set.contains(x));
-    }
+fn union<T: Eq + std::hash::Hash>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
+    let mut set: HashSet<T> = a.into_iter().collect();
+    set.extend(b);
+    set.into_iter().collect()
+}
 
-    result.into_iter().collect()
+/// Convert from symbolic ("dummy" in GMPL parlance) subscript
+/// to actual indexable values
+pub fn concrete_index(subscript: &Subscript, idx_val_map: &IdxValMap) -> Result<Index> {
+    Ok(subscript
+        .iter()
+        .map(|i| {
+            // First try to look up as a domain variable
+            // If not found, check if it's a literal number
+            let index_val = idx_val_or_get(idx_val_map, i.var)?;
+            match &i.shift {
+                Some(shift) => match index_val {
+                    SetVal::Str(_) => {
+                        bail!("tried to index shift on string index val")
+                    }
+                    SetVal::Int(index_num) => match shift {
+                        SubscriptShift::Plus => Ok(SetVal::Int(index_num + 1)),
+                        SubscriptShift::Minus => Ok(SetVal::Int(index_num - 1)),
+                    },
+                    SetVal::Tuple(_) => {
+                        bail!("tuple set not allowed in var subscript")
+                    }
+                },
+                None => Ok(index_val),
+            }
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into())
 }

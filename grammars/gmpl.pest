@@ -59,10 +59,13 @@ set_dimen       =  { "dimen" ~ int }
 set_assign      =  { ":=" ~ (set_expr | set_vals | set_tuples) }
 
 set_default     =  { "default" ~ ( set_expr | set_vals | set_tuples) }
-set_expr        =  { domain | set_inter | set_setof | set_ref }
-set_ref         =  { id ~ index? }
-set_inter       =  { var_subscripted ~ ("inter" ~ var_subscripted)+ }
+set_expr        =  { set_atom ~ (set_infix_op ~ set_atom)* }
+set_infix_op    =  { "inter" | "union" }
+set_atom        =  { domain | set_setof | set_arith | set_ref | ("(" ~ set_expr ~ ")") }
+set_ref         =  { id ~ subscript? }
 set_setof       =  { "setof" ~ domain ~ domain_var }
+set_arith       =  { set_arith_end ~ ".." ~ set_arith_end }
+set_arith_end   =  { int | (domain_set ~ subscript?) }
 
 set_tuples       = { set_tuple+ }
 set_tuple        = { "(" ~ set_val ~ ("," ~ set_val)+ ~ ")" }
@@ -70,7 +73,7 @@ set_vals         = { (","? ~ set_val)+ }
 set_val          = { id | int }
 
 // unlike `domain`, this doesn't allow a condition, and the "f in" part is optional
-set_within      =  { "within" ~ (id | domain) ~ ("cross" ~ cross_set)? }
+set_within      =  { "within" ~ (id | domain) ~ ("cross" ~ cross_set)* }
 within_set      = @{ id }
 cross_set       = @{ id }
 
@@ -163,10 +166,7 @@ param_data_any      =  { "*" }
 // example:
 // {r in REG, t in TECH:Capacity[r,t,y]<>0}
 domain             =  { "{" ~ (domain_part ~ ","?)+ ~ (":" ~ logic_expr)? ~ "}" }
-domain_part        =  { (domain_var ~ "in")? ~ (domain_part_range | domain_part_set) }
-domain_part_set    =  { domain_set ~ subscript? }
-domain_part_range  =  { domain_range_end ~ ".." ~ domain_range_end }
-domain_range_end   =  { int | (domain_set ~ subscript?) }
+domain_part        =  { (domain_var ~ "in")? ~ set_expr }
 domain_var         =  { domain_var_single | domain_var_tuple }
 domain_var_single  = @{ id }
 domain_var_tuple   = { "(" ~ id ~ ("," ~ id)+ ~ ")" }
@@ -216,7 +216,7 @@ conditional     =  { "if" ~ logic_expr ~ "then" ~ expr ~ ("else" ~ expr)? }
 func             = _{ func_min | func_max | func_card }
 func_min         =  { "min" ~ domain ~ "min" ~ "(" ~ func_var ~ ")" }
 func_max         =  { "max" ~ domain ~ "max" ~ "(" ~ func_var ~ ")" }
-func_card        =  { "card" ~ "(" ~ func_var ~ subscript? ~ ")" }
+func_card        =  { "card" ~ "(" ~ set_expr ~ ")" }
 func_var         = @{ id }
 bool_and         =  { "and" | "&&" }
 bool_or          =  { "or" | "||" }

@@ -63,6 +63,7 @@ pub enum RowType {
     Unconstrained,
 }
 
+// TODO move to mps
 impl fmt::Display for RowType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
