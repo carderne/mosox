@@ -5,7 +5,7 @@ use std::fmt;
 
 use anyhow::{Result, bail};
 
-use crate::ir::{self, RelOp};
+use crate::ir::{self, RelOp, VarType};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Bounds {
@@ -14,35 +14,42 @@ pub enum Bounds {
 }
 
 impl Bounds {
-    pub fn from_gmpl_bounds(bounds: Vec<ir::VarBounds>) -> Result<Self> {
-        if bounds.is_empty() {
-            return Ok(Self::Range(f64::NEG_INFINITY, f64::INFINITY));
-        };
+    pub fn from_gmpl_bounds(var: ir::Var) -> Result<Self> {
+        match var.var_type {
+            VarType::Binary => Ok(Self::Range(0.0, 1.0)),
+            _ => {
+                if var.bounds.is_empty() {
+                    return Ok(Self::Range(f64::NEG_INFINITY, f64::INFINITY));
+                };
 
-        let mut lower: Option<f64> = None;
-        let mut upper: Option<f64> = None;
-        let mut fixed: Option<f64> = None;
+                let mut lower: Option<f64> = None;
+                let mut upper: Option<f64> = None;
+                let mut fixed: Option<f64> = None;
 
-        for bound in bounds {
-            match bound.op {
-                ir::RelOp::Lt => bail!("less than not supported in var bounds"),
-                ir::RelOp::Le => upper = Some(bound.value),
-                ir::RelOp::Eq | ir::RelOp::EqEq => fixed = Some(bound.value),
-                ir::RelOp::Ne | ir::RelOp::Ne2 => bail!("not equal not supported in var bounds"),
-                ir::RelOp::Ge => lower = Some(bound.value),
-                ir::RelOp::Gt => bail!("greater than not supported in var bounds"),
+                for bound in var.bounds {
+                    match bound.op {
+                        ir::RelOp::Lt => bail!("less than not supported in var bounds"),
+                        ir::RelOp::Le => upper = Some(bound.value),
+                        ir::RelOp::Eq | ir::RelOp::EqEq => fixed = Some(bound.value),
+                        ir::RelOp::Ne | ir::RelOp::Ne2 => {
+                            bail!("not equal not supported in var bounds")
+                        }
+                        ir::RelOp::Ge => lower = Some(bound.value),
+                        ir::RelOp::Gt => bail!("greater than not supported in var bounds"),
+                    }
+                }
+
+                if let Some(fixed) = fixed {
+                    if lower.is_some() || upper.is_some() {
+                        bail!("cannot specify fixed and inequality var bounds");
+                    }
+                    Ok(Self::Fixed(fixed))
+                } else {
+                    let lower = lower.unwrap_or(f64::NEG_INFINITY);
+                    let upper = upper.unwrap_or(f64::INFINITY);
+                    Ok(Self::Range(lower, upper))
+                }
             }
-        }
-
-        if let Some(fixed) = fixed {
-            if lower.is_some() || upper.is_some() {
-                bail!("cannot specify fixed and inequality var bounds");
-            }
-            Ok(Self::Fixed(fixed))
-        } else {
-            let lower = lower.unwrap_or(f64::NEG_INFINITY);
-            let upper = upper.unwrap_or(f64::INFINITY);
-            Ok(Self::Range(lower, upper))
         }
     }
 

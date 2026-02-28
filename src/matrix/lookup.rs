@@ -45,7 +45,7 @@ impl Lookups {
                         var.name,
                         VarCont {
                             var_type: var.var_type,
-                            bounds: Bounds::from_gmpl_bounds(var.bounds)?,
+                            bounds: Bounds::from_gmpl_bounds(var)?,
                         },
                     ))
                 })

@@ -38,7 +38,7 @@ Please choose the appropriate archive.
 
 Usage overview:
 ```bash
-> mosox help
+mosox help
 
 MathProg Translation Kit
 
@@ -58,34 +58,30 @@ Options:
 
 ### Compile MPS
 Compile MPS for one of the examples in this repo.
-Output will be written to stdout.
+Output will be written to to the provided file:
 ```bash
-mosox compile examples/basic/model.mod
+mosox compile examples/basic/model.mod -o output.mps
 ```
 
 Or an example with a separate data file, piping MPS to a file:
 ```bash
-mosox compile examples/sets/model.mod examples/sets/data.dat > output.mps
+mosox compile examples/sets/model.mod examples/sets/data.dat -o output.mps
 ```
 
 ### Solve a model
-Results summary will be printed to stdout.
+Results will be saved to the output file:
 ```bash
-mosox solve examples/basic/model.mod
+mosox solve examples/basic/model.mod -o output.txt
 
-# output
-OBJECTIVE VALUE
-2200.000
-
-CONSTRAINTS
-labor = 100.000; marginal = 16.667
-material = 80.000; marginal = 6.667
-
-VARS
-x1 = 40.000; marginal = -0.000
-x2 = 20.000; marginal = -0.000
+# Loading model from model.mod
+# Generating matrix
+# Matrix compiled in 666.625µs
+# Matrix: 3 rows, 2 cols, 6 nonzero
+# Solving matrix with HiGHS
+# Solved in 1.939083ms
+# Objective value: 2200
+# Results output to f.txt
 ```
-
 
 
 ## Development

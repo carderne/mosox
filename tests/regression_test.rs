@@ -43,11 +43,16 @@ fn regression_examples() {
         let dat_file = find_file_by_ext(&subdir, "dat");
 
         // Run mosox compile
+        let temp_dir = std::env::temp_dir().join("mosox_regression_test");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let raw_output = temp_dir.join(format!("{}_raw.mps", dir_name));
+
         let mut cmd = Command::cargo_bin("mosox").unwrap();
         cmd.arg("compile").arg(&mod_file);
         if let Some(ref dat) = dat_file {
             cmd.arg(dat);
         }
+        cmd.arg("-o").arg(&raw_output);
         let output = cmd.output().expect("failed to run mosox");
 
         if !output.status.success() {
@@ -60,11 +65,9 @@ fn regression_examples() {
         }
 
         // Normalize the compiled output
-        let temp_dir = std::env::temp_dir().join("mosox_regression_test");
-        fs::create_dir_all(&temp_dir).unwrap();
         let normalized_output = temp_dir.join(format!("{}_normalized.mps", dir_name));
 
-        let raw_reader = BufReader::new(&output.stdout[..]);
+        let raw_reader = BufReader::new(File::open(&raw_output).unwrap());
         let writer = File::create(&normalized_output).unwrap();
         normalize_mps(raw_reader, writer);
 
@@ -89,6 +92,7 @@ fn regression_examples() {
         }
 
         // Clean up
+        let _ = fs::remove_file(&raw_output);
         let _ = fs::remove_file(&normalized_output);
     }
 

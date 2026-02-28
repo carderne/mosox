@@ -17,10 +17,11 @@ use anyhow::{Context, Result};
 use crate::gmpl::loader;
 pub use crate::highs::format::Format;
 use crate::highs::highs_solve;
+use crate::highs::output::write_solution;
 use crate::ir::Entry;
 use crate::ir::model::ModelWithData;
 use crate::matrix::{Compiled, gen_matrix};
-use crate::mps::output::print_mps;
+use crate::mps::output::{print_mps, write_mps_to_file};
 
 /// Loads the GMPL model file at `path` into an internal representation
 pub fn load_model(path: &str) -> Result<Vec<Entry>> {
@@ -81,13 +82,34 @@ pub fn matrix_to_mps(compiled: Compiled, model_name: &str) {
     print_mps(compiled, model_name);
 }
 
+/// Write matrix in MPS format to a file.
+pub fn matrix_to_mps_file(
+    compiled: Compiled,
+    model_name: &str,
+    path: &std::path::Path,
+) -> Result<()> {
+    eprintln!("Outputting MPS to {}", path.display());
+    write_mps_to_file(compiled, model_name, path)?;
+    Ok(())
+}
+
 /// Solve the compiled matrix with Highs
-pub fn solve_matrix(compiled: Compiled, format: Format, config: &[(String, String)]) -> Result<()> {
+pub fn solve_matrix(
+    compiled: Compiled,
+    format: Format,
+    config: &[(String, String)],
+    verbose: bool,
+    output: Option<&std::path::Path>,
+) -> Result<()> {
     eprintln!("Solving matrix with HiGHS");
     let t0 = Instant::now();
-    highs_solve(compiled, format, config)?;
+    let solution = highs_solve(compiled, config, verbose)?;
     eprintln!("Solved in {:?}", t0.elapsed());
-    eprintln!("Results output to stdout");
+    eprintln!("Objective value: {}", solution.objective_value);
+    if let Some(path) = output {
+        write_solution(solution, format, path);
+        eprintln!("Results output to {}", path.display());
+    }
     Ok(())
 }
 

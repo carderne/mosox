@@ -1,6 +1,7 @@
 use std::fmt::Write as _;
 use std::io::{BufWriter, Write};
 
+use crate::matrix::{VarId, VarWithCoefficients};
 use crate::{
     ir::{
         Index, VarType,
@@ -12,14 +13,27 @@ use crate::{
 
 pub fn print_mps(compiled: Compiled, model_name: &str) {
     let stdout = std::io::stdout();
-    let mut w = BufWriter::with_capacity(256 * 1024, stdout.lock());
+    let w = BufWriter::with_capacity(256 * 1024, stdout.lock());
+    write_mps(compiled, model_name, w);
+}
 
+pub fn write_mps_to_file(
+    compiled: Compiled,
+    model_name: &str,
+    path: &std::path::Path,
+) -> std::io::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let w = BufWriter::with_capacity(256 * 1024, file);
+    write_mps(compiled, model_name, w);
+    Ok(())
+}
+
+fn write_mps(compiled: Compiled, model_name: &str, mut w: impl Write) {
     writeln!(w, "NAME {model_name}").unwrap();
     write_con_rows(&mut w, &compiled.cons);
     write_var_cols(&mut w, &compiled.vars);
     write_con_rhs(&mut w, &compiled.cons);
     write_var_bounds(&mut w, &compiled.vars);
-    write_int_bin_vars(&mut w, &compiled.vars);
     writeln!(w, "ENDATA").unwrap();
     // BufWriter flushes on drop
 }
@@ -35,9 +49,25 @@ fn write_con_rows(w: &mut impl Write, rows: &ConsMap) {
 }
 
 fn write_var_cols(w: &mut impl Write, cols: &VarsMap) {
+    writeln!(w, "COLUMNS").unwrap();
+
+    let mut cols_flt = vec![];
+    let mut cols_int = vec![];
+    cols.iter().for_each(|col| match col.1.var_type {
+        VarType::Float => cols_flt.push(col),
+        _ => cols_int.push(col),
+    });
+
+    write_col_lines(w, cols_flt);
+    writeln!(w, " M0000001 'MARKER' 'INTORG'").unwrap();
+    write_col_lines(w, cols_int);
+    writeln!(w, " M0000001 'MARKER' 'INTEND'").unwrap();
+}
+
+fn write_col_lines(w: &mut impl Write, cols: Vec<(&VarId, &VarWithCoefficients)>) {
     let mut var_idx_buf = String::with_capacity(128);
     let mut con_idx_buf = String::with_capacity(128);
-    writeln!(w, "COLUMNS").unwrap();
+
     for ((var_name, var_index), con_map) in cols {
         let var_name = intern_resolve(*var_name);
         let var_idx_str = write_index_vals(&mut var_idx_buf, var_index);
@@ -99,43 +129,21 @@ fn write_var_bounds(w: &mut impl Write, vars: &VarsMap) {
                         }
                     }
 
-                    // MPS upper bound is +inf by default (so PL marker never used)
-                    if upper != f64::INFINITY {
-                        if var_type == VarType::Float {
+                    if var_type == VarType::Float {
+                        // MPS upper bound is +inf by default (so PL marker never used)
+                        if upper != f64::INFINITY {
                             writeln!(w, " UP BND1 {var_name}{idx_str} {upper}").unwrap();
+                        }
+                    } else {
+                        // upper bound is 1 by default for int/bin variables
+                        if upper == f64::INFINITY {
+                            writeln!(w, " PL BND1 {var_name}{idx_str}").unwrap();
                         } else {
                             writeln!(w, " UI BND1 {var_name}{idx_str} {upper}").unwrap();
                         }
                     }
                 }
             }
-        }
-    }
-}
-
-fn write_int_bin_vars(w: &mut impl Write, vars: &VarsMap) {
-    let mut idx_buf = String::with_capacity(128);
-    let int_vars = vars
-        .iter()
-        .filter(|(_, var)| var.var_type == VarType::Integer);
-    if int_vars.clone().count() > 0 {
-        writeln!(w, "INTEGER").unwrap();
-        for ((var_name, var_idx), _) in int_vars {
-            let var_name = intern_resolve(*var_name);
-            let idx_str = write_index_vals(&mut idx_buf, var_idx);
-            writeln!(w, " {var_name}{idx_str}").unwrap();
-        }
-    }
-
-    let bin_vars = vars
-        .iter()
-        .filter(|(_, var)| var.var_type == VarType::Binary);
-    if bin_vars.clone().count() > 0 {
-        writeln!(w, "BINARY").unwrap();
-        for ((var_name, var_idx), _) in bin_vars {
-            let var_name = intern_resolve(*var_name);
-            let idx_str = write_index_vals(&mut idx_buf, var_idx);
-            writeln!(w, " {var_name}{idx_str}").unwrap();
         }
     }
 }

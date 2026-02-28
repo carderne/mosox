@@ -10,7 +10,8 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 
 use mosox::{
-    Format, generate_matrix, load_model_and_data, matrix_to_mps, merge_model, solve_matrix, stem,
+    Format, generate_matrix, load_model_and_data, matrix_to_mps_file, merge_model, solve_matrix,
+    stem,
 };
 
 #[derive(Parser)]
@@ -27,6 +28,9 @@ enum Commands {
     Compile {
         path: String,
         data_path: Option<String>,
+        /// Output file path for MPS output
+        #[arg(short, long)]
+        output: Option<String>,
     },
     /// Solve with HiGHS
     Solve {
@@ -37,6 +41,12 @@ enum Commands {
         /// Solver options as KEY=VALUE pairs (e.g. -c threads=4 -c log_file=out.txt)
         #[arg(short = 'c', long = "config", value_name = "KEY=VALUE")]
         highs_config: Vec<String>,
+        /// Output file path for MPS output
+        #[arg(short, long)]
+        output: Option<String>,
+        /// Enable verbose logging
+        #[arg(short, long, default_value_t = false)]
+        verbose: bool,
     },
     /// Normalize an MPS file for diffing
     Normalize { input: String, output: String },
@@ -52,11 +62,17 @@ enum Commands {
 fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match &cli.command {
-        Commands::Compile { path, data_path } => {
+        Commands::Compile {
+            path,
+            data_path,
+            output,
+        } => {
             let entries = load_model_and_data(path, data_path.as_deref())?;
             let model = merge_model(entries)?;
             let compiled = generate_matrix(model)?;
-            matrix_to_mps(compiled, stem(path));
+            if let Some(output) = output {
+                matrix_to_mps_file(compiled, stem(path), std::path::Path::new(output))?;
+            }
             Ok(())
         }
         Commands::Solve {
@@ -64,6 +80,8 @@ fn run() -> anyhow::Result<()> {
             data_path,
             format,
             highs_config,
+            output,
+            verbose,
         } => {
             let config: Vec<(String, String)> = highs_config
                 .iter()
@@ -79,7 +97,13 @@ fn run() -> anyhow::Result<()> {
             let entries = load_model_and_data(path, data_path.as_deref())?;
             let model = merge_model(entries)?;
             let compiled = generate_matrix(model)?;
-            solve_matrix(compiled, format.clone(), &config)?;
+            solve_matrix(
+                compiled,
+                format.clone(),
+                &config,
+                *verbose,
+                output.as_deref().map(std::path::Path::new),
+            )?;
             Ok(())
         }
         Commands::Normalize { input, output } => {

@@ -36,6 +36,33 @@ fn split_rhs_line(normalized: &str) -> Vec<String> {
     }
 }
 
+fn is_marker_line(normalized: &str) -> bool {
+    normalized.contains("'MARKER'")
+}
+
+fn flush_section(
+    section_lines: &mut Vec<String>,
+    integer_lines: &mut Vec<String>,
+    current_section: Option<&str>,
+    writer: &mut impl Write,
+) {
+    section_lines.sort();
+    for sl in section_lines.iter() {
+        writeln!(writer, "{sl}").unwrap();
+    }
+    section_lines.clear();
+
+    if current_section == Some("COLUMNS") && !integer_lines.is_empty() {
+        writeln!(writer, "M0000001 'MARKER' 'INTORG'").unwrap();
+        integer_lines.sort();
+        for sl in integer_lines.iter() {
+            writeln!(writer, "{sl}").unwrap();
+        }
+        writeln!(writer, "M0000001 'MARKER' 'INTEND'").unwrap();
+        integer_lines.clear();
+    }
+}
+
 /// Normalize an MPS file for deterministic comparison.
 ///
 /// Strips comments, normalizes whitespace, splits packed column/RHS entries,
@@ -45,6 +72,8 @@ fn split_rhs_line(normalized: &str) -> Vec<String> {
 pub fn normalize_mps(reader: impl BufRead, mut writer: impl Write) {
     let mut current_section: Option<&str> = None;
     let mut section_lines: Vec<String> = Vec::new();
+    let mut integer_lines: Vec<String> = Vec::new();
+    let mut in_integer_block = false;
 
     for line in reader.lines() {
         let line = line.expect("failed to read line");
@@ -58,15 +87,15 @@ pub fn normalize_mps(reader: impl BufRead, mut writer: impl Write) {
         let first_word = stripped.split_whitespace().next().unwrap_or("");
 
         if is_section_header(first_word) {
-            if !section_lines.is_empty() {
-                section_lines.sort();
-                for sl in &section_lines {
-                    writeln!(writer, "{sl}").unwrap();
-                }
-                section_lines.clear();
-            }
+            flush_section(
+                &mut section_lines,
+                &mut integer_lines,
+                current_section,
+                &mut writer,
+            );
 
             current_section = SECTION_HEADERS.iter().find(|&&h| h == first_word).copied();
+            in_integer_block = false;
             writeln!(writer, "{}", normalize_whitespace(line)).unwrap();
         } else {
             let normalized = normalize_whitespace(line);
@@ -74,7 +103,15 @@ pub fn normalize_mps(reader: impl BufRead, mut writer: impl Write) {
                 continue;
             }
 
+            if current_section == Some("COLUMNS") && is_marker_line(&normalized) {
+                in_integer_block = normalized.contains("'INTORG'");
+                continue;
+            }
+
             match current_section {
+                Some("COLUMNS") if in_integer_block => {
+                    integer_lines.extend(split_columns_line(&normalized));
+                }
                 Some("COLUMNS") => section_lines.extend(split_columns_line(&normalized)),
                 Some("RHS") => section_lines.extend(split_rhs_line(&normalized)),
                 _ => section_lines.push(normalized),
@@ -83,10 +120,12 @@ pub fn normalize_mps(reader: impl BufRead, mut writer: impl Write) {
     }
 
     // Flush final section
-    section_lines.sort();
-    for sl in &section_lines {
-        writeln!(writer, "{sl}").unwrap();
-    }
+    flush_section(
+        &mut section_lines,
+        &mut integer_lines,
+        current_section,
+        &mut writer,
+    );
 }
 
 /// Compare two normalized MPS files line-by-line with epsilon tolerance for

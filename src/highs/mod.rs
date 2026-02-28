@@ -1,15 +1,13 @@
 mod config;
 pub mod format;
-mod output;
-
-use std::io::BufWriter;
+pub mod output;
 
 use anyhow::Result;
 use highs::{ColProblem, Row, Sense};
 use indexmap::IndexMap;
 
 use crate::{
-    highs::{config::apply_options, format::Format, output::format_name},
+    highs::{config::apply_options, output::format_name},
     ir::{ObjSense, VarType, op::RowType},
     matrix::{Compiled, ConId, VarId},
 };
@@ -27,10 +25,11 @@ pub struct SolutionData {
     pub variables: Vec<SolutionRow>,
 }
 
-pub fn highs_solve(compiled: Compiled, format: Format, config: &[(String, String)]) -> Result<()> {
-    let stdout = std::io::stdout();
-    let mut w = BufWriter::with_capacity(256 * 1024, stdout.lock());
-
+pub fn highs_solve(
+    compiled: Compiled,
+    config: &[(String, String)],
+    verbose: bool,
+) -> Result<SolutionData> {
     let Compiled { sense, vars, cons } = compiled;
 
     let mut pb = ColProblem::new();
@@ -95,6 +94,10 @@ pub fn highs_solve(compiled: Compiled, format: Format, config: &[(String, String
         ObjSense::Maximize => Sense::Maximise,
     };
     let mut model = pb.optimise(highs_sense);
+    if verbose {
+        model.set_option(&b"output_flag"[..], true);
+        model.set_option(&b"log_to_console"[..], true);
+    }
     apply_options(&mut model, config)?;
 
     let solved_model = model.solve();
@@ -125,16 +128,10 @@ pub fn highs_solve(compiled: Compiled, format: Format, config: &[(String, String
         })
         .collect();
 
-    let data = SolutionData {
+    Ok(SolutionData {
         objective_name,
         objective_value,
         constraints,
         variables,
-    };
-
-    match format {
-        Format::Txt => output::write_txt(&mut w, &data),
-        Format::Csv => output::write_csv(&mut w, &data),
-    };
-    Ok(())
+    })
 }
