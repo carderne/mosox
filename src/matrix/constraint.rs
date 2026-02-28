@@ -1,6 +1,7 @@
+use crate::ir::interner::intern_resolve;
 use crate::ir::{
     BoolOp, Domain, DomainPart, DomainPartVar, Expr, Index, MathOp, ParamVal, RelOp, SetVal,
-    SetValTerminal,
+    SetValTerminal, Subscript,
 };
 use crate::ir::{LogicExpr, MemberOp, SetAtom, SetExpr, SubsetOp};
 use crate::matrix::lookup::Lookups;
@@ -71,6 +72,28 @@ pub fn resolve_param(
             None => bail!("tried to get uninitialized param"),
         },
     }
+}
+
+pub fn resolve_param_to_setval(
+    name: &Spur,
+    subscript: &Subscript,
+    idx_val_map: &IdxValMap,
+    lookups: &Lookups,
+) -> Result<SetVal> {
+    let index = concrete_index(subscript, idx_val_map, lookups)?;
+    let param = lookups
+        .par_map
+        .get(name)
+        .with_context(|| format!("range end '{}' not found in params", intern_resolve(*name)))?;
+    let terms = resolve_param(param, &index, idx_val_map, lookups)?;
+    if terms.len() != 1 {
+        bail!("Need to resolve param to single term for setval");
+    }
+    Ok(match &terms[0] {
+        Term::Str(spur) => SetVal::Str(*spur),
+        Term::Num(num) => SetVal::Int(*num as u32),
+        Term::Pair(_) => bail!("Cannot resolve vars to a param setval"),
+    })
 }
 
 pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Result<Vec<Term>> {
@@ -358,7 +381,10 @@ pub fn resolve_terms_to_num(terms: &[Term]) -> Result<Option<f64>> {
     let mut sum = 0.0;
     for t in terms {
         match t {
-            Term::Str(_) => bail!("Cannot do math on a string term"),
+            Term::Str(spur) => bail!(
+                "AAA Cannot do math on a string term: {}",
+                intern_resolve(*spur)
+            ),
             Term::Num(num) => sum += num,
             Term::Pair(_) => return Ok(None),
         }

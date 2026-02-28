@@ -7,10 +7,13 @@ use crate::ir::{
     Expr, Index, ParamAssign, ParamDataBody, ParamDataPlainValue, ParamDataTarget, ParamVal, SetVal,
 };
 
+#[derive(Debug, Clone)]
 pub struct Param {
     pub data: ParamValEnum,
     pub default: Option<Expr>,
 }
+
+#[derive(Debug, Clone)]
 pub enum ParamValEnum {
     Arr(HashMap<Index, ParamVal>),
     Expr(Expr),

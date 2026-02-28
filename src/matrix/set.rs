@@ -2,13 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     ir::{
-        ParamVal, SetArith, SetArithEnd, SetAtom, SetInfixOp, Subscript, SubscriptPartVar,
-        SubscriptShift, interner::intern_resolve,
+        SetArith, SetArithEnd, SetAtom, SetInfixOp, Subscript, SubscriptPartVar, SubscriptShift,
+        interner::intern_resolve,
     },
-    matrix::{
-        constraint::{resolve_param, resolve_terms_to_num},
-        param::ParamValEnum,
-    },
+    matrix::constraint::resolve_param_to_setval,
 };
 use anyhow::{Context, Result, bail};
 use lasso::Spur;
@@ -202,25 +199,10 @@ fn resolve_range_end(end: &SetArithEnd, idx_val_map: &IdxValMap, lookups: &Looku
             subscript,
             shift,
         } => {
-            let index = concrete_index(subscript, idx_val_map, lookups)?;
-
-            // Look up as a param — range ends must be scalar integers
-            let param = lookups.par_map.get(name).with_context(|| {
-                format!("range end '{}' not found in params", intern_resolve(*name))
-            })?;
-
-            let base = match &param.data {
-                ParamValEnum::Arr(arr) => *arr
-                    .get(&index)
-                    .context("no value at index for range end param")?,
-                _ => bail!("range end param must be a numeric scalar or array"),
+            let base = match resolve_param_to_setval(name, subscript, idx_val_map, lookups)? {
+                SetVal::Int(val) => val,
+                _ => bail!("Can only use integer param in set arithmetic expr"),
             };
-
-            let base = match base {
-                ParamVal::Str(_) => bail!("Cannot have symbolic param in arithmetic set"),
-                ParamVal::Num(num) => num,
-            } as u32;
-
             match shift {
                 Some(shift) => match shift {
                     SubscriptShift::Plus(offset) => Ok(base + offset),
@@ -264,16 +246,12 @@ fn idx_val_or_get(var: &SubscriptPartVar, map: &IdxValMap, lookups: &Lookups) ->
             // param. Eg MyParam[i, foo, bar[qux]]
             // i is probably an index, foo could be anything, bar definitely a param
             Ok(val) => Ok(val),
-            Err(err) => match lookups.par_map.get(&inner.var) {
-                Some(param) => {
-                    let index = concrete_index(&inner.subscript, map, lookups)?;
-                    let terms = resolve_param(param, &index, map, lookups)?;
-                    let num = resolve_terms_to_num(&terms)?
-                        .context("cannot reference variables inside subscript")?;
-                    Ok(SetVal::Int(num as u32))
-                }
-                None => Err(err),
-            },
+            Err(_) => Ok(resolve_param_to_setval(
+                &inner.var,
+                &inner.subscript,
+                map,
+                lookups,
+            )?),
         },
     }
 }
