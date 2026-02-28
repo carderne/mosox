@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{Result, bail};
 use lasso::Spur;
-use smallvec::smallvec;
+use smallvec::{SmallVec, smallvec};
 
 use crate::ir::{
     Check, Constraint, ConstraintExpr, Domain, Entry, Expr, ObjSense, Objective, Param,
@@ -234,16 +234,9 @@ fn regroup_set_values(values: &SetVals, dimen: usize) -> Result<SetVals> {
         })
         .collect::<Result<Vec<SetValTerminal>>>()?;
 
-    // Group by dimen (only supports 2-tuples currently)
-    assert!(
-        dimen == 2,
-        "Only 2-element tuples supported, got dimen={}",
-        dimen
-    );
-
     let tuples: Vec<SetVal> = terminals
         .chunks(dimen)
-        .map(|chunk| SetVal::Tuple([chunk[0], chunk[1]]))
+        .map(|chunk| SetVal::Tuple(SmallVec::from_slice(chunk)))
         .collect();
 
     Ok(SetVals(tuples))

@@ -52,32 +52,7 @@ pub fn create_param(param: ParamWithData) -> Result<Param> {
                         default,
                     })
                 }
-
-                // else if plain_entries.len() == 1 {
-                //     let first = &plain_entries[0];
-                //     let num = first.value;
-                //     Ok(Param {
-                //         data: ParamValEnum::Scalar(num),
-                //         default,
-                //     })
-                // } else {
-                //     let mut arr: HashMap<Index, ParamVal> = HashMap::new();
-                //     for scalar in plain_entries {
-                //         let target_idxs = param_target_to_index(scalar.target);
-                //         arr.insert(target_idxs.into(), scalar.value);
-                //     }
-                // }
             }
-            // ParamDataBody::List(lists) => {
-            //     let mut arr: HashMap<Index, ParamVal> = HashMap::new();
-            //     for list in lists {
-            //         let target_idxs = param_target_to_index(list.target);
-            //     }
-            //     Ok(Param {
-            //         data: ParamValEnum::Arr(arr),
-            //         default,
-            //     })
-            // }
             ParamDataBody::Tabular(tables) => {
                 let mut arr: HashMap<Index, ParamVal> = HashMap::new();
                 for table in tables {
@@ -85,7 +60,9 @@ pub fn create_param(param: ParamWithData) -> Result<Param> {
                     for row in table.rows {
                         for (col, value) in table.cols.iter().zip(row.values.iter()) {
                             arr.insert(
-                                [target_idxs.clone(), vec![row.label, *col]].concat().into(),
+                                [target_idxs.clone(), vec![row.label.clone(), col.clone()]]
+                                    .concat()
+                                    .into(),
                                 *value,
                             );
                         }

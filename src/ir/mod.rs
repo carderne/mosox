@@ -6,7 +6,7 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, bail};
 use lasso::Spur;
 use pest::iterators::Pair;
 use pest::iterators::Pairs;
@@ -1148,12 +1148,20 @@ impl Conditional {
 // ==============================
 
 /// Set val (identifier or positive integer)
-#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub enum SetVal {
     Str(Spur),
     Int(u32),
-    // This will panic if there's a tuple with more than two elements
-    Tuple([SetValTerminal; 2]),
+    Tuple(SmallVec<[SetValTerminal; 2]>),
+}
+
+impl From<SetValTerminal> for SetVal {
+    fn from(inner: SetValTerminal) -> Self {
+        match inner {
+            SetValTerminal::Str(v) => SetVal::Str(v),
+            SetValTerminal::Int(v) => SetVal::Int(v),
+        }
+    }
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
@@ -1179,7 +1187,15 @@ impl fmt::Display for SetVal {
         match self {
             SetVal::Str(s) => write!(f, "{}", intern_resolve(*s)),
             SetVal::Int(n) => write!(f, "{}", n),
-            SetVal::Tuple([a, b]) => write!(f, "{},{}", a, b),
+            SetVal::Tuple(vals) => {
+                for (i, v) in vals.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, "{}", v)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -1473,12 +1489,7 @@ fn parse_set_vals_or_tuples(pair: Pair<Rule>) -> Result<SetVals> {
                             })
                         })
                         .collect::<Result<Vec<_>>>()?;
-                    ensure!(
-                        tuple_vals.len() == 2,
-                        "Only 2-element tuples supported, got {}",
-                        tuple_vals.len()
-                    );
-                    values.push(SetVal::Tuple([tuple_vals[0], tuple_vals[1]]));
+                    values.push(SetVal::Tuple(SmallVec::from_vec(tuple_vals)));
                 }
             }
         }

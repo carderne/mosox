@@ -169,7 +169,6 @@ It is intended that all of these will ultimately be supported, and most of them 
 - These logical operators: `not`
 
 ### Sets
-- Elements larger than two-tuple.
 - `within` (parsed, not enforced)
 
 ### Parameters

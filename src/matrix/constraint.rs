@@ -20,7 +20,7 @@ pub struct Pair {
 #[derive(Clone, Debug)]
 pub enum Term {
     Num(f64),
-    Pair(Pair),
+    Pair(Box<Pair>),
     // This is a special case only used in domain conditions
     // to eg check two domain indexes are the same
     // Also possible when a symbolic param is present
@@ -43,7 +43,7 @@ pub type IdxValMap = SmallVec<[(Spur, SetVal); 8]>;
 fn idx_extend(map: &mut IdxValMap, other: &IdxValMap) {
     for (k, v) in other.iter() {
         if !map.iter().any(|(mk, _)| *mk == *k) {
-            map.push((*k, *v));
+            map.push((*k, v.clone()));
         }
     }
 }
@@ -81,11 +81,11 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Resul
             let index = concrete_index(&var_or_param.subscript, idx_val_map, lookups)?;
 
             if lookups.var_map.contains_key(name) {
-                Ok(vec![Term::Pair(Pair {
+                Ok(vec![Term::Pair(Box::new(Pair {
                     coeff: 1.0,
                     index,
                     var: *name,
-                })])
+                }))])
             } else if let Some(param) = lookups.par_map.get(name) {
                 resolve_param(param, &index, idx_val_map, lookups)
             } else {
@@ -144,17 +144,17 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Resul
                 MathOp::Sub => match (lhs_num, rhs_num) {
                     (Some(lhs), Some(rhs)) => Ok(vec![Term::Num(lhs - rhs)]),
                     (None, None) => {
-                        let rhs_pairs: Vec<Pair> = rhs
+                        let rhs_pairs: Vec<Box<Pair>> = rhs
                             .into_iter()
                             .filter_map(|p| if let Term::Pair(n) = p { Some(n) } else { None })
                             .collect();
 
                         let rhs_pairs_neg = rhs_pairs.into_iter().map(|pair| {
-                            Term::Pair(Pair {
+                            Term::Pair(Box::new(Pair {
                                 var: pair.var,
                                 index: pair.index,
                                 coeff: -pair.coeff,
-                            })
+                            }))
                         });
                         Ok(lhs.into_iter().chain(rhs_pairs_neg).collect())
                     }
@@ -163,11 +163,11 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Resul
                         .map(|p| match p {
                             Term::Str(_) => bail!("Cannot do math on a string term"),
                             Term::Num(inner) => Ok(Term::Num(inner - num)),
-                            Term::Pair(pair) => Ok(Term::Pair(Pair {
+                            Term::Pair(pair) => Ok(Term::Pair(Box::new(Pair {
                                 coeff: pair.coeff - num,
                                 index: pair.index,
                                 var: pair.var,
-                            })),
+                            }))),
                         })
                         .collect(),
                     _ => bail!("no vars allowed in expr sub"),
@@ -181,11 +181,11 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Resul
                             .map(|p| match p {
                                 Term::Str(_) => bail!("Cannot do math on a string term"),
                                 Term::Num(inner) => Ok(Term::Num(inner * num)),
-                                Term::Pair(pair) => Ok(Term::Pair(Pair {
+                                Term::Pair(pair) => Ok(Term::Pair(Box::new(Pair {
                                     coeff: pair.coeff * num,
                                     index: pair.index,
                                     var: pair.var,
-                                })),
+                                }))),
                             })
                             .collect()
                     }
@@ -198,11 +198,11 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Resul
                         .map(|p| match p {
                             Term::Str(_) => bail!("Cannot do math on a string term"),
                             Term::Num(inner) => Ok(Term::Num(inner / num)),
-                            Term::Pair(pair) => Ok(Term::Pair(Pair {
+                            Term::Pair(pair) => Ok(Term::Pair(Box::new(Pair {
                                 coeff: pair.coeff / num,
                                 index: pair.index,
                                 var: pair.var,
-                            })),
+                            }))),
                         })
                         .collect(),
                     _ => bail!("no vars allowed in expr div"),
@@ -243,7 +243,7 @@ pub fn domain_to_indexes(
                             .iter()
                             .map(|val| {
                                 let mut new_idx = existing.clone();
-                                new_idx.push(*val);
+                                new_idx.push(val.clone());
                                 new_idx
                             })
                             .collect::<Vec<_>>())
@@ -399,11 +399,23 @@ pub fn algebra(lhs: Vec<Term>, rhs: Vec<Term>) -> (Vec<Pair>, f64) {
 
     let lhs_pairs: Vec<Pair> = lhs
         .into_iter()
-        .filter_map(|p| if let Term::Pair(n) = p { Some(n) } else { None })
+        .filter_map(|p| {
+            if let Term::Pair(n) = p {
+                Some(*n)
+            } else {
+                None
+            }
+        })
         .collect();
     let rhs_pairs: Vec<Pair> = rhs
         .into_iter()
-        .filter_map(|p| if let Term::Pair(n) = p { Some(n) } else { None })
+        .filter_map(|p| {
+            if let Term::Pair(n) = p {
+                Some(*n)
+            } else {
+                None
+            }
+        })
         .collect();
 
     let rhs_pairs_neg: Vec<Pair> = rhs_pairs
@@ -422,21 +434,20 @@ pub fn algebra(lhs: Vec<Term>, rhs: Vec<Term>) -> (Vec<Pair>, f64) {
     (pairs, rhs_total)
 }
 
-// I'd prefer this function to accept an Index only, but then I have to clone for the Vec->SmallVec
-// conversion
+/// Merge references and values into a mapping
+/// idx_val_map stores the current LOCATION
+/// as a dict like:
+/// { y => 2014, r: "Africa" }
+/// I'd prefer this function to accept an Index only, but then I have to clone for the Vec->SmallVec conversion
+/// This should be improved so that it also knows which set/dimension
+/// each entry comes from...
 pub fn get_index_map(parts: &[DomainPart], idx: &[SetVal]) -> Result<IdxValMap> {
-    // idx_val_map stores the current LOCATION
-    // as a dict like:
-    // { y => 2014, r: "Africa" }
-    //
-    // This should be improved so that it also knows which set/dimension
-    // each entry comes from...
     Ok(parts
         .iter()
         .zip(idx.iter().cloned())
         .map(|(part, idx_val)| -> Result<SmallVec<[(Spur, SetVal); 4]>> {
-            Ok(match (&part.var, idx_val) {
-                (DomainPartVar::Single(s), val) => smallvec::smallvec![(*s, val)],
+            Ok(match (&part.var, &idx_val) {
+                (DomainPartVar::Single(s), val) => smallvec::smallvec![(*s, val.clone())],
                 (DomainPartVar::Tuple(vars), SetVal::Tuple(vals)) => vars
                     .iter()
                     .zip(vals.iter())
@@ -515,11 +526,11 @@ fn negate_terms(terms: Vec<Term>) -> Result<Vec<Term>> {
         .map(|t| match t {
             Term::Str(_) => bail!("Cannot unary neg a string term"),
             Term::Num(n) => Ok(Term::Num(-n)),
-            Term::Pair(p) => Ok(Term::Pair(Pair {
+            Term::Pair(p) => Ok(Term::Pair(Box::new(Pair {
                 coeff: -p.coeff,
                 var: p.var,
                 index: p.index,
-            })),
+            }))),
         })
         .collect()
 }

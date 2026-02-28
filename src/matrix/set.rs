@@ -93,7 +93,7 @@ fn resolve_set_atom(expr: &SetAtom, idx_val_map: &IdxValMap, lookups: &Lookups) 
                 .iter()
                 // TODO we're handling only the special case of a single dimension
                 // to handle more we must check if len > 1 and then build a SetVal::Tuple
-                .map(|i| *i.first().unwrap())
+                .map(|i| i.first().unwrap().clone())
                 .collect::<Vec<_>>()
                 .into())
         }
@@ -124,86 +124,61 @@ pub fn resolve_set_expr(
     }
 }
 
+/// Resolve a GMPL `setof` expression.
+///
+/// Iterates over the domain, evaluating the integrand for each combination of dummy indices
+/// to produce the result set.
+///
+/// - **Single integrand** (`setof{i in S} i`): produces a set of 1-tuples (scalar values).
+/// - **Tuple integrand** (`setof{i in S} (i, f[i])`): produces a set of m-tuples.
 fn resolve_set_of(set_of: &SetOf, idx_val_map: &IdxValMap, lookups: &Lookups) -> Result<SetVals> {
-    // Get all index combinations from the domain
-    let domain_indexes = domain_to_indexes(&set_of.domain, lookups, idx_val_map)?;
-
-    // Extract the integrand values for each domain element
-    let mut result = Vec::new();
-    for idx in domain_indexes {
-        // Build a map from domain vars to their values for this iteration
-        let iter_map: IdxValMap = set_of
-            .domain
-            .parts
-            .iter()
-            .zip(idx.iter())
-            .map(|(part, val)| {
-                Ok(match &part.var {
-                    DomainPartVar::None => bail!("Need domain part var in setof expression"),
-                    DomainPartVar::Single(id) => vec![(*id, *val)],
-                    DomainPartVar::Tuple(ids) => {
-                        // For tuple bindings, the val should be a Tuple
-                        match val {
-                            SetVal::Tuple([a, b]) => {
-                                let mut mappings = Vec::new();
-                                if let Some(id) = ids.first() {
-                                    mappings.push((
-                                        *id,
-                                        match a {
-                                            SetValTerminal::Str(s) => SetVal::Str(*s),
-                                            SetValTerminal::Int(i) => SetVal::Int(*i),
-                                        },
-                                    ));
-                                }
-                                if let Some(id) = ids.get(1) {
-                                    mappings.push((
-                                        *id,
-                                        match b {
-                                            SetValTerminal::Str(s) => SetVal::Str(*s),
-                                            SetValTerminal::Int(i) => SetVal::Int(*i),
-                                        },
-                                    ));
-                                }
-                                mappings
-                            }
-                            _ => vec![],
-                        }
-                    }
-                })
-            })
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect();
-
-        // Extract integrand value(s)
-        match &set_of.integrand {
-            DomainPartVar::None => bail!("Need domain part var in setof expression"),
-            DomainPartVar::Single(id) => {
-                // Should this actually return an error if the idx_get fails?
-                if let Ok(val) = idx_get(&iter_map, *id) {
-                    result.push(val);
-                }
-            }
-            DomainPartVar::Tuple(ids) => {
-                // Build tuple from integrand vars
-                let vals: Vec<SetValTerminal> = ids
-                    .iter()
-                    .filter_map(|id| idx_get(&iter_map, *id).ok())
-                    .map(|v| match v {
-                        SetVal::Str(s) => SetValTerminal::Str(s),
-                        SetVal::Int(i) => SetValTerminal::Int(i),
-                        _ => unreachable!(),
+    Ok(domain_to_indexes(&set_of.domain, lookups, idx_val_map)?
+        .into_iter()
+        .map(|idx| {
+            let local_map: IdxValMap = set_of
+                .domain
+                .parts
+                .iter()
+                .zip(idx.iter())
+                .map(|(part, val)| {
+                    Ok(match &part.var {
+                        DomainPartVar::None => bail!("Need domain part var in setof expression"),
+                        DomainPartVar::Single(id) => vec![(*id, val.clone())],
+                        DomainPartVar::Tuple(ids) => match val {
+                            SetVal::Tuple(tuple) => ids
+                                .iter()
+                                .zip(tuple.iter())
+                                .map(|(id, val)| (*id, (*val).into()))
+                                .collect(),
+                            _ => bail!("Cannot have tuple index pointing at non-tuple value"),
+                        },
                     })
-                    .collect();
-                if vals.len() == 2 {
-                    result.push(SetVal::Tuple([vals[0], vals[1]]));
-                }
-            }
-        }
-    }
+                })
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect();
 
-    Ok(result.into())
+            Ok(match &set_of.integrand {
+                DomainPartVar::None => bail!("Need domain part var in setof expression"),
+                DomainPartVar::Single(id) => idx_get(&local_map, *id)?,
+                DomainPartVar::Tuple(ids) => {
+                    // Build tuple from integrand vars
+                    let vals: Vec<SetValTerminal> = ids
+                        .iter()
+                        .filter_map(|id| idx_get(&local_map, *id).ok())
+                        .map(|v| match v {
+                            SetVal::Str(s) => SetValTerminal::Str(s),
+                            SetVal::Int(i) => SetValTerminal::Int(i),
+                            _ => unreachable!(),
+                        })
+                        .collect();
+                    SetVal::Tuple(vals.into())
+                }
+            })
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into())
 }
 
 /// Resolve a `DomainPartRange` (e.g. `1..NbYears` or `1..NbSeasons[y]`) to the sequence of
@@ -273,7 +248,7 @@ pub fn idx_get(map: &IdxValMap, key: Spur) -> Result<SetVal> {
     map.iter()
         .find(|(k, _)| *k == key)
         .map(|(_, v)| v)
-        .copied()
+        .cloned()
         .with_context(|| {
             let name = intern_resolve(key);
             format!("No idx val at {name}")
@@ -334,4 +309,126 @@ pub fn concrete_index(
         })
         .collect::<Result<Vec<_>>>()?
         .into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{
+        Domain, DomainPart, DomainPartVar, SetAtom, SetExpr, SetOf, SetVal, SetValTerminal,
+        interner::intern, model::SetWithData,
+    };
+    use indexmap::IndexMap;
+    use smallvec::smallvec;
+    use std::collections::HashMap;
+
+    /// Build a minimal `Lookups` containing only the given named sets.
+    fn lookups_with_sets(sets: Vec<SetWithData>) -> Lookups {
+        Lookups {
+            set_map: sets
+                .into_iter()
+                .map(|s| (s.decl.name, SetCont::from(s)))
+                .collect::<IndexMap<_, _>>(),
+            var_map: HashMap::new(),
+            par_map: HashMap::new(),
+        }
+    }
+
+    /// Helper: create a `SetWithData` with no domain and literal values.
+    fn simple_set(name: &str, vals: Vec<SetVal>) -> SetWithData {
+        SetWithData {
+            decl: ir::Set {
+                name: intern(name),
+                domain: Domain::default(),
+                dimen: None,
+                within: None,
+                cross: None,
+                expr: None,
+                inline_data: None,
+                default: None,
+            },
+            data: vec![ir::SetData {
+                name: intern(name),
+                index: smallvec![],
+                values: vals.into(),
+            }],
+        }
+    }
+
+    /// `setof{p in PEOPLE} p` over `PEOPLE := {10, 20, 30}`
+    /// should produce `{10, 20, 30}`.
+    #[test]
+    fn test_setof_single_identity() {
+        let p = intern("p");
+        let people_name = intern("PEOPLE");
+
+        let people = simple_set(
+            "PEOPLE",
+            vec![SetVal::Int(10), SetVal::Int(20), SetVal::Int(30)],
+        );
+        let lookups = lookups_with_sets(vec![people]);
+
+        let set_of = SetOf {
+            domain: Domain {
+                parts: vec![DomainPart {
+                    var: DomainPartVar::Single(p),
+                    expr: SetExpr::Atom(SetAtom::Ref(SetRef {
+                        spur: people_name,
+                        subscript: Subscript::default(),
+                    })),
+                }],
+                condition: None,
+            },
+            integrand: DomainPartVar::Single(p),
+        };
+
+        let result = resolve_set_of(&set_of, &smallvec![], &lookups).unwrap();
+        assert_eq!(
+            result.0,
+            vec![SetVal::Int(10), SetVal::Int(20), SetVal::Int(30)]
+        );
+    }
+
+    /// `setof{p in PEOPLE} (p, p)` over `PEOPLE := {"alice", "bob"}`
+    /// should produce `{("alice","alice"), ("bob","bob")}`.
+    #[test]
+    fn test_setof_tuple_integrand() {
+        let p = intern("p");
+        let people_name = intern("PEOPLE");
+
+        let alice = intern("alice");
+        let bob = intern("bob");
+
+        let people = simple_set("PEOPLE", vec![SetVal::Str(alice), SetVal::Str(bob)]);
+        let lookups = lookups_with_sets(vec![people]);
+
+        let set_of = SetOf {
+            domain: Domain {
+                parts: vec![DomainPart {
+                    var: DomainPartVar::Single(p),
+                    expr: SetExpr::Atom(SetAtom::Ref(SetRef {
+                        spur: people_name,
+                        subscript: Subscript::default(),
+                    })),
+                }],
+                condition: None,
+            },
+            integrand: DomainPartVar::Tuple(vec![p, p]),
+        };
+
+        let result = resolve_set_of(&set_of, &smallvec![], &lookups).unwrap();
+        assert_eq!(
+            result.0,
+            vec![
+                SetVal::Tuple(smallvec![
+                    SetValTerminal::Str(alice),
+                    SetValTerminal::Str(alice)
+                ]),
+                SetVal::Tuple(smallvec![
+                    SetValTerminal::Str(bob),
+                    SetValTerminal::Str(bob)
+                ]),
+            ]
+        );
+    }
 }
