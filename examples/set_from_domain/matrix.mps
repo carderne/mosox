@@ -1,0 +1,31 @@
+NAME model
+ROWS
+N cost
+COLUMNS
+Bar[2020,A,1,2] cost 1
+Bar[2020,B,5,6] cost 1
+Bar[2020,C,8,9] cost 1
+Bar[2021,A,1,2] cost 1
+Bar[2021,B,5,6] cost 1
+Bar[2021,C,8,9] cost 1
+Foo[2020,A,1,2] cost 1
+Foo[2020,B,5,6] cost 1
+Foo[2020,C,8,9] cost 1
+Foo[2021,A,1,2] cost 1
+Foo[2021,B,5,6] cost 1
+Foo[2021,C,8,9] cost 1
+RHS
+BOUNDS
+FR BND1 Bar[2020,A,1,2]
+FR BND1 Bar[2020,B,5,6]
+FR BND1 Bar[2020,C,8,9]
+FR BND1 Bar[2021,A,1,2]
+FR BND1 Bar[2021,B,5,6]
+FR BND1 Bar[2021,C,8,9]
+FR BND1 Foo[2020,A,1,2]
+FR BND1 Foo[2020,B,5,6]
+FR BND1 Foo[2020,C,8,9]
+FR BND1 Foo[2021,A,1,2]
+FR BND1 Foo[2021,B,5,6]
+FR BND1 Foo[2021,C,8,9]
+ENDATA

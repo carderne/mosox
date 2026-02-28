@@ -47,9 +47,7 @@ param_attrib    = _{ param_type | param_condition | param_in | param_default }
 param_type      =  { "integer" | "binary" | "symbolic" }
 param_condition =  { rel_op ~ expr }
 param_in        =  { "in" ~ expr }
-// TODO this needs a more restrictive version of param_data_body
-param_assign    =  { ":=" ~ (expr | param_data_body) }
-// string_literal here is only used for output path
+param_assign    =  { ":=" ~ expr }
 param_default   =  { "default" ~ (expr | string_literal) }
 
 // Set
@@ -74,7 +72,6 @@ set_tuple        = { "(" ~ set_val ~ ("," ~ set_val)+ ~ ")" }
 set_vals         = { (","? ~ set_val)+ }
 set_val          = { id | int }
 
-// unlike `domain`, this doesn't allow a condition, and the "f in" part is optional
 set_within      =  { "within" ~ (id | domain) ~ ("cross" ~ cross_set)* }
 within_set      = @{ id }
 cross_set       = @{ id }

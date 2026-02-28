@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     ir::{
-        SetArith, SetArithEnd, SetAtom, SetInfixOp, Subscript, SubscriptPartVar, SubscriptShift,
-        interner::intern_resolve,
+        Domain, SetArith, SetArithEnd, SetAtom, SetInfixOp, Subscript, SubscriptPartVar,
+        SubscriptShift, interner::intern_resolve,
     },
     matrix::constraint::resolve_param_to_setval,
 };
@@ -49,7 +49,6 @@ impl SetCont {
     pub fn resolve(&self, index: &Index, lookups: &Lookups) -> Result<SetVals> {
         // Data takes preference over expressions (probably)
         if let Some(set_data) = self.data.get(index) {
-            // TODO Should also check that the within/cross conditions are met!
             return Ok(set_data.clone());
         }
 
@@ -76,30 +75,7 @@ impl SetCont {
         }
 
         // No data, no expr, no default
-        // TODO: Apply set dimension (dimen) validation at model generation time
         Ok(vec![].into())
-    }
-}
-
-fn resolve_set_atom(expr: &SetAtom, idx_val_map: &IdxValMap, lookups: &Lookups) -> Result<SetVals> {
-    match expr {
-        // This is using a Set domain expression to actually build the values for the set,
-        // rather than "get" them from one or more sets
-        SetAtom::Domain(domain) => {
-            Ok(domain_to_indexes(domain, lookups, idx_val_map)?
-                .iter()
-                // TODO we're handling only the special case of a single dimension
-                // to handle more we must check if len > 1 and then build a SetVal::Tuple
-                .map(|i| i.first().unwrap().clone())
-                .collect::<Vec<_>>()
-                .into())
-        }
-        SetAtom::SetOf(set_of) => resolve_set_of(set_of, idx_val_map, lookups),
-        SetAtom::Ref(SetRef { spur, subscript }) => {
-            let index = concrete_index(subscript, idx_val_map, lookups)?;
-            lookups.set_map.get(spur).unwrap().resolve(&index, lookups)
-        }
-        SetAtom::Arith(arith) => resolve_set_arith(arith, idx_val_map, lookups),
     }
 }
 
@@ -119,6 +95,62 @@ pub fn resolve_set_expr(
             }
         }
     }
+}
+
+/// Build a Set from one of the expression variants enumerated below.
+fn resolve_set_atom(expr: &SetAtom, idx_val_map: &IdxValMap, lookups: &Lookups) -> Result<SetVals> {
+    match expr {
+        // This is using a Set domain expression to actually build the values for the set,
+        // rather than "get" them from one or more sets
+        SetAtom::Domain(domain) => resolve_set_from_domain(domain, idx_val_map, lookups),
+        SetAtom::SetOf(set_of) => resolve_set_of(set_of, idx_val_map, lookups),
+        SetAtom::Ref(SetRef { spur, subscript }) => {
+            let index = concrete_index(subscript, idx_val_map, lookups)?;
+            lookups.set_map.get(spur).unwrap().resolve(&index, lookups)
+        }
+        SetAtom::Arith(arith) => resolve_set_arith(arith, idx_val_map, lookups),
+    }
+}
+
+/// Build a set by enumerating a domain
+/// Given these sets:
+///     set YEAR;
+///     set FUEL;
+///     set BLOB{FUEL} dimen 2;
+///
+/// Then this expression:
+///     set BOB := {y in YEAR, f in FUEL, (b1,b2) in BLOB[f]};
+///
+/// Will produce [(y,f,b1,b2), ...]
+/// (With values interpolated.)
+fn resolve_set_from_domain(
+    domain: &Domain,
+    idx_val_map: &IdxValMap,
+    lookups: &Lookups,
+) -> Result<SetVals> {
+    Ok(domain_to_indexes(domain, lookups, idx_val_map)?
+        .iter()
+        .map(|index| {
+            if index.is_empty() {
+                bail!("Need at least one dimension to create set from domain");
+            } else {
+                let mut arr: Vec<SetValTerminal> = vec![];
+                for i in index {
+                    match i {
+                        SetVal::Str(val) => arr.push(SetValTerminal::Str(*val)),
+                        SetVal::Int(val) => arr.push(SetValTerminal::Int(*val)),
+                        SetVal::Tuple(vals) => arr.extend(vals),
+                    }
+                }
+                if arr.len() == 1 {
+                    Ok(arr.first().unwrap().into())
+                } else {
+                    Ok(SetVal::Tuple(arr.into()))
+                }
+            }
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into())
 }
 
 /// Resolve a GMPL `setof` expression.
@@ -145,7 +177,7 @@ fn resolve_set_of(set_of: &SetOf, idx_val_map: &IdxValMap, lookups: &Lookups) ->
                             SetVal::Tuple(tuple) => ids
                                 .iter()
                                 .zip(tuple.iter())
-                                .map(|(id, val)| (*id, (*val).into()))
+                                .map(|(id, val)| (*id, val.into()))
                                 .collect(),
                             _ => bail!("Cannot have tuple index pointing at non-tuple value"),
                         },

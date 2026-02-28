@@ -1152,15 +1152,14 @@ impl Conditional {
 pub enum SetVal {
     Str(Spur),
     Int(u32),
-
     Tuple(SmallVec<[SetValTerminal; 2]>),
 }
 
-impl From<SetValTerminal> for SetVal {
-    fn from(inner: SetValTerminal) -> Self {
+impl From<&SetValTerminal> for SetVal {
+    fn from(inner: &SetValTerminal) -> Self {
         match inner {
-            SetValTerminal::Str(v) => SetVal::Str(v),
-            SetValTerminal::Int(v) => SetVal::Int(v),
+            SetValTerminal::Str(v) => SetVal::Str(*v),
+            SetValTerminal::Int(v) => SetVal::Int(*v),
         }
     }
 }
@@ -1182,7 +1181,6 @@ impl SetVal {
     }
 }
 
-// TODO remove these display
 impl fmt::Display for SetVal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

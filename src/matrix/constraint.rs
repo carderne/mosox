@@ -327,9 +327,9 @@ pub fn check_logic_condition(
                 (Term::Str(lhs), Term::Str(rhs)) => match op {
                     RelOp::Eq => lhs == rhs,
                     RelOp::Ne => lhs != rhs,
-                    _ => bail!("unhandled logic expr: TODO"),
+                    _ => bail!("Can only do string == or != in logic expression"),
                 },
-                _ => bail!("vars or mixed terms in domain condition"),
+                _ => bail!("Vars or mixed terms in domain condition"),
             })
         }
         LogicExpr::Membership { lhs, op, rhs } => {
@@ -485,11 +485,7 @@ pub fn get_index_map(parts: &[DomainPart], idx: &[SetVal]) -> Result<IdxValMap> 
                         (*v, set_val)
                     })
                     .collect(),
-                _ => bail!(
-                    "Mismatched tuple/non-tuple indexes: idx_val: {}, var: {}",
-                    idx_val,
-                    "TODO", // part.var
-                ),
+                _ => bail!("Mismatched tuple/non-tuple indexes"),
             })
         })
         .collect::<Result<Vec<_>>>()?
@@ -511,6 +507,7 @@ fn eval_func_minmax(
     // - always just getting the min of that set
 
     // Only support min/maxing a single dimension
+    let which = if is_min { "min" } else { "max" };
     if domain.parts.len() > 1 {
         bail!("min/max func can only operate on one dimension");
     }
@@ -530,7 +527,7 @@ fn eval_func_minmax(
                     .try_fold(None::<u32>, |acc, si| {
                         let num = match si {
                             SetVal::Int(n) => *n,
-                            _ => bail!("cannot use func min/max on non-integer index"),
+                            _ => bail!("Func {which} needs integer index"),
                         };
                         Ok(Some(match acc {
                             Some(a) if is_min => a.min(num),
@@ -541,7 +538,7 @@ fn eval_func_minmax(
                     .context("empty set for min/max")?;
                 Ok(val as f64)
             }
-            _ => bail!("TODO"),
+            _ => bail!("Func {which} needs simple expression"),
         },
     }
 }

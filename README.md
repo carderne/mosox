@@ -159,13 +159,14 @@ It is intended that all of these will ultimately be supported, and most of them 
 ### Expressions
 - These arithmetic operators: `less`, `div`, `mod`
 - These symbolic operators: `&` (string concatenation)
-- These set expressions: conditional set expressions, parenthesized set expressions
+- These set expressions: conditional set expressions
 - These set operators: `diff`, `symdiff`.
 - These logical iterated expressions: `forall`, `exists`
 - These logical operators: `not`
 
 ### Sets
 - `within` (parsed, not enforced)
+- `dimen` (parsed, not enforced)
 
 ### Parameters
 - Relational condition (parsed, not enforced)

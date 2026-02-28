@@ -1,10 +1,10 @@
-use std::fmt::Write as _;
 use std::io::{BufWriter, Write};
 
 use crate::matrix::{VarId, VarWithCoefficients};
+use crate::mps::utils::write_index_vals;
 use crate::{
     ir::{
-        Index, VarType,
+        VarType,
         interner::intern_resolve,
         op::{Bounds, RowType},
     },
@@ -41,10 +41,10 @@ fn write_mps(compiled: Compiled, model_name: &str, mut w: impl Write) {
 fn write_con_rows(w: &mut impl Write, rows: &ConsMap) {
     let mut idx_buf = String::with_capacity(128);
     writeln!(w, "ROWS").unwrap();
-    for ((name, idx), dir, _) in rows {
+    for ((name, idx), row_type, _) in rows {
         let name = intern_resolve(*name);
         let idx_str = write_index_vals(&mut idx_buf, idx);
-        writeln!(w, " {dir}  {name}{idx_str}").unwrap();
+        writeln!(w, " {row_type}  {name}{idx_str}").unwrap();
     }
 }
 
@@ -59,9 +59,11 @@ fn write_var_cols(w: &mut impl Write, cols: &VarsMap) {
     });
 
     write_col_lines(w, cols_flt);
-    writeln!(w, " M0000001 'MARKER' 'INTORG'").unwrap();
-    write_col_lines(w, cols_int);
-    writeln!(w, " M0000001 'MARKER' 'INTEND'").unwrap();
+    if cols_int.len() >= 1 {
+        writeln!(w, " M0000001 'MARKER' 'INTORG'").unwrap();
+        write_col_lines(w, cols_int);
+        writeln!(w, " M0000001 'MARKER' 'INTEND'").unwrap();
+    }
 }
 
 fn write_col_lines(w: &mut impl Write, cols: Vec<(&VarId, &VarWithCoefficients)>) {
@@ -146,20 +148,4 @@ fn write_var_bounds(w: &mut impl Write, vars: &VarsMap) {
             }
         }
     }
-}
-
-#[inline]
-pub fn write_index_vals<'a>(buf: &'a mut String, v: &Index) -> &'a str {
-    buf.clear();
-    if !v.is_empty() {
-        buf.push('[');
-        for (i, item) in v.iter().enumerate() {
-            if i > 0 {
-                buf.push(',');
-            }
-            write!(buf, "{item}").unwrap();
-        }
-        buf.push(']');
-    }
-    buf.as_str()
 }

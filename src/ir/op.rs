@@ -1,8 +1,6 @@
 //! These operators are slightly further generalised from
 //! the structs in ir/mod.rs.
 
-use std::fmt;
-
 use anyhow::{Result, bail};
 
 use crate::ir::{self, RelOp, VarType};
@@ -68,18 +66,6 @@ pub enum RowType {
     GreaterThanOrEqual,
     /// Used for the objective function
     Unconstrained,
-}
-
-// TODO move to mps
-impl fmt::Display for RowType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            RowType::LessThanOrEqual => write!(f, "L"),
-            RowType::Equal => write!(f, "E"),
-            RowType::GreaterThanOrEqual => write!(f, "G"),
-            RowType::Unconstrained => write!(f, "N"),
-        }
-    }
 }
 
 impl RowType {
