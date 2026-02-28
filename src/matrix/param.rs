@@ -1,58 +1,87 @@
 use std::collections::HashMap;
 
+use anyhow::{Result, bail};
+
 use crate::ir::model::ParamWithData;
-use crate::ir::{Expr, Index, ParamAssign, ParamDataBody, ParamDataTarget, SetVal};
+use crate::ir::{
+    Expr, Index, ParamAssign, ParamDataBody, ParamDataPlainValue, ParamDataTarget, ParamVal, SetVal,
+};
 
 pub struct Param {
-    pub data: ParamVal,
+    pub data: ParamValEnum,
     pub default: Option<Expr>,
 }
-pub enum ParamVal {
-    Arr(HashMap<Index, f64>),
-    Scalar(f64),
+pub enum ParamValEnum {
+    Arr(HashMap<Index, ParamVal>),
     Expr(Expr),
-    Symbolic,
     None,
 }
 
-pub fn create_param(param: ParamWithData) -> Param {
-    let default = resolve_param_default(&param);
+pub fn create_param(param: ParamWithData) -> Result<Param> {
+    let default = resolve_param_default(&param)?;
     if let Some(data) = param.data
         && let Some(body) = data.body
     {
         match body {
-            ParamDataBody::Num(num) => Param {
-                data: ParamVal::Scalar(num),
-                default,
-            },
-            ParamDataBody::List(pairs) => {
-                let mut arr: HashMap<Index, f64> = HashMap::new();
-                for pair in pairs {
-                    arr.insert(vec![pair.key].into(), pair.value);
+            ParamDataBody::Plain(plain_entries) => {
+                if plain_entries.is_empty() {
+                    Ok(Param {
+                        data: ParamValEnum::None,
+                        default,
+                    })
+                } else {
+                    let mut arr: HashMap<Index, ParamVal> = HashMap::new();
+                    for entry in plain_entries {
+                        let target_idxs = param_target_to_index(entry.target);
+                        match entry.value {
+                            ParamDataPlainValue::Scalar(val) => {
+                                arr.insert(target_idxs.into(), val);
+                            }
+                            ParamDataPlainValue::Pairs(pairs) => {
+                                for pair in pairs {
+                                    arr.insert(
+                                        [target_idxs.clone(), vec![pair.key]].concat().into(),
+                                        pair.value,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Ok(Param {
+                        data: ParamValEnum::Arr(arr),
+                        default,
+                    })
                 }
-                Param {
-                    data: ParamVal::Arr(arr),
-                    default,
-                }
+
+                // else if plain_entries.len() == 1 {
+                //     let first = &plain_entries[0];
+                //     let num = first.value;
+                //     Ok(Param {
+                //         data: ParamValEnum::Scalar(num),
+                //         default,
+                //     })
+                // } else {
+                //     let mut arr: HashMap<Index, ParamVal> = HashMap::new();
+                //     for scalar in plain_entries {
+                //         let target_idxs = param_target_to_index(scalar.target);
+                //         arr.insert(target_idxs.into(), scalar.value);
+                //     }
+                // }
             }
-            ParamDataBody::Tables(tables) => {
-                let mut arr: HashMap<Index, f64> = HashMap::new();
+            // ParamDataBody::List(lists) => {
+            //     let mut arr: HashMap<Index, ParamVal> = HashMap::new();
+            //     for list in lists {
+            //         let target_idxs = param_target_to_index(list.target);
+            //     }
+            //     Ok(Param {
+            //         data: ParamValEnum::Arr(arr),
+            //         default,
+            //     })
+            // }
+            ParamDataBody::Tabular(tables) => {
+                let mut arr: HashMap<Index, ParamVal> = HashMap::new();
                 for table in tables {
-                    // Expressions like:
-                    // [Atlantis_00A,NGCC,NOx,*,*]:
-                    // Become prefixes for the indexes down below
-                    // NOTE: Current implementation ONLY supports having exactly two * (Any)
-                    // targets, and they must be the last two
-                    let target_idxs: Vec<SetVal> = match table.target {
-                        Some(targets) => targets
-                            .into_iter()
-                            .filter_map(|t| match t {
-                                ParamDataTarget::IndexVar(idx) => Some(idx),
-                                ParamDataTarget::Any => None,
-                            })
-                            .collect(),
-                        None => vec![],
-                    };
+                    let target_idxs = param_target_to_index(table.target);
                     for row in table.rows {
                         for (col, value) in table.cols.iter().zip(row.values.iter()) {
                             arr.insert(
@@ -62,37 +91,52 @@ pub fn create_param(param: ParamWithData) -> Param {
                         }
                     }
                 }
-                Param {
-                    data: ParamVal::Arr(arr),
+                Ok(Param {
+                    data: ParamValEnum::Arr(arr),
                     default,
-                }
+                })
             }
-            ParamDataBody::Symbolic(_) => Param {
-                data: ParamVal::Symbolic,
-                default,
-            },
         }
     } else if let Some(ParamAssign::Expr(expr)) = param.decl.assign {
-        Param {
-            data: ParamVal::Expr(expr),
+        Ok(Param {
+            data: ParamValEnum::Expr(expr),
             default,
-        }
+        })
     } else {
-        Param {
-            data: ParamVal::None,
+        Ok(Param {
+            data: ParamValEnum::None,
             default,
-        }
+        })
     }
 }
 
-fn resolve_param_default(param: &ParamWithData) -> Option<Expr> {
+fn param_target_to_index(target: Option<Vec<ParamDataTarget>>) -> Vec<SetVal> {
+    // Expressions like:
+    // [Atlantis_00A,NGCC,NOx,*,*]:
+    // Become prefixes for the indexes down below
+    match target {
+        Some(targets) => targets
+            .into_iter()
+            .filter_map(|t| match t {
+                ParamDataTarget::IndexVar(idx) => Some(idx),
+                ParamDataTarget::Any => None,
+            })
+            .collect(),
+        None => vec![],
+    }
+}
+
+fn resolve_param_default(param: &ParamWithData) -> Result<Option<Expr>> {
     if let Some(data) = &param.data {
         if let Some(default) = data.default {
-            return Some(Expr::Number(default));
+            match default {
+                ParamVal::Num(num) => return Ok(Some(Expr::Number(num))),
+                ParamVal::Str(_) => bail!("no support for symbolic default param value"),
+            }
         };
     } else if let Some(default) = &param.decl.default {
-        return Some(default.clone());
+        return Ok(Some(default.clone()));
     };
 
-    None
+    Ok(None)
 }

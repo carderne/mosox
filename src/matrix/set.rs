@@ -2,10 +2,13 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     ir::{
-        SetArith, SetArithEnd, SetAtom, SetInfixOp, Subscript, SubscriptPartVar, SubscriptShift,
-        interner::intern_resolve,
+        ParamVal, SetArith, SetArithEnd, SetAtom, SetInfixOp, Subscript, SubscriptPartVar,
+        SubscriptShift, interner::intern_resolve,
     },
-    matrix::constraint::{resolve_param, resolve_terms_to_num},
+    matrix::{
+        constraint::{resolve_param, resolve_terms_to_num},
+        param::ParamValEnum,
+    },
 };
 use anyhow::{Context, Result, bail};
 use lasso::Spur;
@@ -232,11 +235,15 @@ fn resolve_range_end(end: &SetArithEnd, idx_val_map: &IdxValMap, lookups: &Looku
             })?;
 
             let base = match &param.data {
-                crate::matrix::param::ParamVal::Scalar(n) => *n,
-                crate::matrix::param::ParamVal::Arr(arr) => *arr
+                ParamValEnum::Arr(arr) => *arr
                     .get(&index)
                     .context("no value at index for range end param")?,
                 _ => bail!("range end param must be a numeric scalar or array"),
+            };
+
+            let base = match base {
+                ParamVal::Str(_) => bail!("Cannot have symbolic param in arithmetic set"),
+                ParamVal::Num(num) => num,
             } as u32;
 
             match shift {

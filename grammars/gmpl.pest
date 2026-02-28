@@ -47,7 +47,8 @@ param_attrib    = _{ param_type | param_condition | param_in | param_default }
 param_type      =  { "integer" | "binary" | "symbolic" }
 param_condition =  { rel_op ~ expr }
 param_in        =  { "in" ~ expr }
-param_assign    =  { ":=" ~ (param_data_body | expr) }
+// TODO this needs a more restrictive version of param_data_body
+param_assign    =  { ":=" ~ (expr | param_data_body) }
 // string_literal here is only used for output path
 param_default   =  { "default" ~ (expr | string_literal) }
 
@@ -146,16 +147,18 @@ PARAM_DATA          =  {
     "param" ~ id ~ domain? ~ ("default" ~ param_data_default)? ~ ":="? ~ param_data_body? ~ ";"
 }
 param_data_default  = @{ number }
-param_data_body =      { param_data_symbolic | param_data_matrix+ | param_data_list | param_data_scalar }
+param_data_body     = { param_data_symbolic | param_data_matrix+ | param_data_entry+ }
+param_data_entry    = { param_data_target? ~ ":="? ~ (param_data_pair+ | param_data_val) }
 param_data_symbolic = @{ string_literal }
-param_data_scalar   = @{ number }
-param_data_list     =  { param_data_pair+ }
-param_data_pair     =  { set_val_data ~ number ~ ","? }
+param_data_scalar   =  { param_data_target? ~ ":="? ~ param_data_val }
+param_data_list     =  { param_data_target? ~ ":="? ~ param_data_pair+ }
+param_data_pair     =  { set_val_data ~ param_data_val ~ ","? }
 param_data_matrix   =  { param_data_target? ~ ":" ~ param_data_cols ~ ":="? ~ param_data_row+ }
 param_data_cols     =  { set_val_data+ }
 param_data_row      = ${ set_val_data ~ param_data_row_vals }
 param_data_row_vals = ${ ((" " | "\t")+ ~ param_data_val)+ }
-param_data_val      = @{ number }
+// Param symbolic allows id to be used in param_val
+param_data_val      =  { id | number }
 param_data_target   =  { "[" ~ (set_val_data | param_data_any) ~ ("," ~ (set_val_data | param_data_any))* ~ "]" }
 param_data_any      =  { "*" }
 

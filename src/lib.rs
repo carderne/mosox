@@ -47,7 +47,7 @@ pub fn load_model_and_data(path: &str, data_path: Option<&str>) -> Result<Vec<En
     let model_entries = load_model(path)?;
     let data_entries = match data_path {
         Some(data_path) => {
-            eprintln!("Loading data from {path}");
+            eprintln!("Loading data from {data_path}");
             load_data(data_path)?
         }
         None => vec![],

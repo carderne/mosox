@@ -1,9 +1,10 @@
 use crate::ir::{
-    BoolOp, Domain, DomainPart, DomainPartVar, Expr, Index, MathOp, RelOp, SetVal, SetValTerminal,
+    BoolOp, Domain, DomainPart, DomainPartVar, Expr, Index, MathOp, ParamVal, RelOp, SetVal,
+    SetValTerminal,
 };
 use crate::ir::{LogicExpr, MemberOp, SetAtom, SetExpr, SubsetOp};
 use crate::matrix::lookup::Lookups;
-use crate::matrix::param::{Param, ParamVal};
+use crate::matrix::param::{Param, ParamValEnum};
 use crate::matrix::set::{concrete_index, idx_get, resolve_set_expr};
 use anyhow::{Context, Result, bail};
 use lasso::Spur;
@@ -22,7 +23,17 @@ pub enum Term {
     Pair(Pair),
     // This is a special case only used in domain conditions
     // to eg check two domain indexes are the same
+    // Also possible when a symbolic param is present
     Str(Spur),
+}
+
+impl From<&ParamVal> for Term {
+    fn from(inner: &ParamVal) -> Self {
+        match inner {
+            ParamVal::Str(val) => Term::Str(*val),
+            ParamVal::Num(val) => Term::Num(*val),
+        }
+    }
 }
 
 //                       index   index value
@@ -44,10 +55,9 @@ pub fn resolve_param(
     lookups: &Lookups,
 ) -> Result<Vec<Term>> {
     match &param.data {
-        ParamVal::Scalar(num) => Ok(vec![Term::Num(*num)]),
-        ParamVal::Arr(arr) => {
+        ParamValEnum::Arr(arr) => {
             if let Some(arr_val) = arr.get(index) {
-                Ok(vec![Term::Num(*arr_val)])
+                Ok(vec![arr_val.into()])
             } else {
                 match &param.default {
                     Some(expr) => recurse(expr, lookups, idx_val_map),
@@ -55,14 +65,11 @@ pub fn resolve_param(
                 }
             }
         }
-        ParamVal::Expr(expr) => recurse(expr, lookups, idx_val_map),
-        ParamVal::None => match &param.default {
+        ParamValEnum::Expr(expr) => recurse(expr, lookups, idx_val_map),
+        ParamValEnum::None => match &param.default {
             Some(expr) => recurse(expr, lookups, idx_val_map),
             None => bail!("tried to get uninitialized param"),
         },
-        ParamVal::Symbolic => {
-            bail!("symbolic params are not supported in constraint evaluation")
-        }
     }
 }
 

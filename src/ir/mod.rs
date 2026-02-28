@@ -617,38 +617,65 @@ impl SetData {
 #[derive(Clone, Debug)]
 pub struct ParamDataPair {
     pub key: SetVal,
-    pub value: f64,
+    pub value: ParamVal,
 }
 
 impl ParamDataPair {
     pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
         let mut tokens = entry.into_inner();
-        let key = tokens.next().context("missing param data key")?.as_str();
-        let key = key
-            .parse::<u32>()
-            .map(SetVal::Int)
-            .unwrap_or_else(|_| SetVal::Str(intern(key)));
-        let value: f64 = tokens
-            .next()
-            .context("missing param data value")?
-            .as_str()
-            .parse()?;
+        let key = SetVal::from_entry(tokens.next().context("missing param data key")?)?;
+        let value = ParamVal::from_entry(tokens.next().context("missing param data value")?)?;
         Ok(Self { key, value })
     }
 }
 
 #[derive(Clone, Debug)]
+pub enum ParamDataPlainValue {
+    Scalar(ParamVal),
+    Pairs(Vec<ParamDataPair>),
+}
+
+#[derive(Clone, Debug)]
+pub struct ParamDataPlain {
+    pub target: Option<Vec<ParamDataTarget>>,
+    pub value: ParamDataPlainValue,
+}
+
+impl ParamDataPlain {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        let mut target = None;
+        let mut pairs = Vec::new();
+        let mut scalar = None;
+
+        for pair in entry.into_inner() {
+            match pair.as_rule() {
+                Rule::param_data_target => target = Some(parse_param_data_target(pair)?),
+                Rule::param_data_pair => pairs.push(ParamDataPair::from_entry(pair)?),
+                Rule::param_data_val => scalar = Some(ParamVal::from_entry(pair)?),
+                _ => {}
+            }
+        }
+
+        let value = if !pairs.is_empty() {
+            ParamDataPlainValue::Pairs(pairs)
+        } else {
+            ParamDataPlainValue::Scalar(scalar.context("missing param_data_plain value")?)
+        };
+
+        Ok(Self { target, value })
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum ParamDataBody {
-    Tables(Vec<ParamDataTable>),
-    List(Vec<ParamDataPair>),
-    Num(f64),
-    Symbolic(String),
+    Tabular(Vec<ParamDataTable>),
+    Plain(Vec<ParamDataPlain>),
 }
 
 #[derive(Clone, Debug)]
 pub struct ParamData {
     pub name: Spur,
-    pub default: Option<f64>,
+    pub default: Option<ParamVal>,
     pub body: Option<ParamDataBody>,
 }
 
@@ -661,7 +688,7 @@ impl ParamData {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::id => name = Some(intern(pair.as_str())),
-                Rule::param_data_default => default = Some(pair.as_str().parse()?),
+                Rule::param_data_default => default = Some(ParamVal::Num(pair.as_str().parse()?)),
                 Rule::param_data_body => {
                     body = Some(parse_param_data_body(pair)?);
                 }
@@ -821,17 +848,7 @@ impl ParamDataTable {
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::param_data_target => {
-                    let mut targets = Vec::new();
-                    for inner in pair.into_inner() {
-                        match inner.as_rule() {
-                            Rule::set_val_data => {
-                                targets.push(ParamDataTarget::IndexVar(SetVal::from_entry(inner)?))
-                            }
-                            Rule::param_data_any => targets.push(ParamDataTarget::Any),
-                            _ => {}
-                        }
-                    }
-                    target = Some(targets);
+                    target = Some(parse_param_data_target(pair)?);
                 }
                 Rule::param_data_cols => {
                     for inner in pair.into_inner() {
@@ -865,7 +882,7 @@ pub enum ParamDataTarget {
 #[derive(Clone, Debug)]
 pub struct ParamDataRow {
     pub label: SetVal,
-    pub values: Vec<f64>,
+    pub values: Vec<ParamVal>,
 }
 
 impl ParamDataRow {
@@ -888,11 +905,11 @@ impl ParamDataRow {
                 Rule::param_data_row_vals => {
                     for inner in pair.into_inner() {
                         if inner.as_rule() == Rule::param_data_val {
-                            values.push(inner.as_str().parse().unwrap_or(0.0));
+                            values.push(ParamVal::from_entry(inner)?);
                         }
                     }
                 }
-                Rule::param_data_val => values.push(pair.as_str().parse().unwrap_or(0.0)),
+                Rule::param_data_val => values.push(ParamVal::from_entry(pair)?),
                 _ => {}
             }
         }
@@ -1173,6 +1190,27 @@ impl fmt::Display for SetValTerminal {
             SetValTerminal::Str(s) => write!(f, "{}", intern_resolve(*s)),
             SetValTerminal::Int(n) => write!(f, "{}", n),
         }
+    }
+}
+
+/// Param val
+/// Usually number, but can be symbolic (string)
+/// When symbolic, should only be used for eg indexing and obviously cannot end up in matrix
+/// What a pain.
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum ParamVal {
+    Str(Spur),
+    Num(f64),
+}
+
+impl ParamVal {
+    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        let inner = entry.into_inner().next().context("empty param_data_val")?;
+        Ok(match inner.as_rule() {
+            Rule::id => ParamVal::Str(intern(inner.as_str())),
+            Rule::number => ParamVal::Num(inner.as_str().parse()?),
+            _ => bail!("unexpected rule in param_data_val: {:?}", inner.as_rule()),
+        })
     }
 }
 
@@ -1458,35 +1496,51 @@ fn parse_set_assign(pair: Pair<Rule>) -> Result<SetVals> {
     }
 }
 
+/// Parse param_data_target into Vec<ParamDataTarget>
+fn parse_param_data_target(pair: Pair<Rule>) -> Result<Vec<ParamDataTarget>> {
+    let mut targets = Vec::new();
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::set_val_data => {
+                targets.push(ParamDataTarget::IndexVar(SetVal::from_entry(inner)?))
+            }
+            Rule::param_data_any => targets.push(ParamDataTarget::Any),
+            _ => {}
+        }
+    }
+    Ok(targets)
+}
+
 /// Parse param_data_body into ParamDataBody (reused by Param and ParamData)
 fn parse_param_data_body(pair: Pair<Rule>) -> Result<ParamDataBody> {
     let mut inner_pairs = pair.into_inner();
     let first = inner_pairs.next().context("empty param_data_body")?;
 
     Ok(match first.as_rule() {
-        Rule::param_data_list => {
-            let pairs: Vec<_> = first
-                .into_inner()
-                .map(ParamDataPair::from_entry)
-                .collect::<Result<_>>()?;
-            ParamDataBody::List(pairs)
-        }
         Rule::param_data_matrix => {
             let mut tables = vec![ParamDataTable::from_entry(first)?];
             let rest: Vec<_> = inner_pairs
                 .map(ParamDataTable::from_entry)
                 .collect::<Result<_>>()?;
             tables.extend(rest);
-            ParamDataBody::Tables(tables)
-        }
-        Rule::param_data_scalar => {
-            let num: f64 = first.as_str().parse()?;
-            ParamDataBody::Num(num)
+            ParamDataBody::Tabular(tables)
         }
         Rule::param_data_symbolic => {
             let s = first.as_str();
             let unquoted = s[1..s.len() - 1].to_string();
-            ParamDataBody::Symbolic(unquoted)
+            let plain = ParamDataPlain {
+                target: None,
+                value: ParamDataPlainValue::Scalar(ParamVal::Str(intern(&unquoted))),
+            };
+            ParamDataBody::Plain(vec![plain])
+        }
+        Rule::param_data_entry => {
+            let mut entries = vec![ParamDataPlain::from_entry(first)?];
+            let rest: Vec<_> = inner_pairs
+                .map(ParamDataPlain::from_entry)
+                .collect::<Result<_>>()?;
+            entries.extend(rest);
+            ParamDataBody::Plain(entries)
         }
         _ => bail!("unexpected rule in param_data_body: {:?}", first.as_rule()),
     })

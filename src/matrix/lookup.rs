@@ -52,8 +52,8 @@ impl Lookups {
                 .collect::<Result<_>>()?,
             par_map: pars
                 .into_iter()
-                .map(|param| (param.decl.name, create_param(param)))
-                .collect(),
+                .map(|param| Ok((param.decl.name, create_param(param)?)))
+                .collect::<Result<_>>()?,
         })
     }
 }
