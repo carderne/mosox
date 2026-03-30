@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// Parse the text using Pest
-pub fn parse(data: &str) -> Result<Pairs<'_, Rule>> {
+pub fn parse(data: &str) -> Result<Vec<Entry>> {
     let mut entries = ModelParser::parse(Rule::root, data).map_err(|e| {
         let (line, col) = match e.line_col {
             LineColLocation::Pos((l, c)) => (l, c),
@@ -21,11 +21,11 @@ pub fn parse(data: &str) -> Result<Pairs<'_, Rule>> {
     let entry = entries
         .next()
         .context("File did not even contain an EOI, didn't think this was possible.")?;
-    Ok(entry.into_inner())
+    consume(entry.into_inner())
 }
 
 /// Convert the AST Pest Pairs into a IR
-pub fn consume(entries: Pairs<'_, Rule>) -> Result<Vec<Entry>> {
+fn consume(entries: Pairs<'_, Rule>) -> Result<Vec<Entry>> {
     let mut result = Vec::new();
     for entry in entries {
         match entry.as_rule() {
@@ -82,7 +82,6 @@ mod tests {
         let text = r#"
             param DiscountRate{r in REGION};
         "#;
-        let entries = parse(&text).unwrap();
-        consume(entries).unwrap();
+        parse(&text).unwrap();
     }
 }

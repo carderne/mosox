@@ -59,7 +59,7 @@ fn write_var_cols(w: &mut impl Write, cols: &VarsMap) {
     });
 
     write_col_lines(w, cols_flt);
-    if cols_int.len() >= 1 {
+    if !cols_int.is_empty() {
         writeln!(w, " M0000001 'MARKER' 'INTORG'").unwrap();
         write_col_lines(w, cols_int);
         writeln!(w, " M0000001 'MARKER' 'INTEND'").unwrap();

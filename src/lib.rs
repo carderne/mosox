@@ -27,8 +27,7 @@ use crate::mps::output::{print_mps, write_mps_to_file};
 pub fn load_model(path: &str) -> Result<Vec<Entry>> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("Cannot read file: {path}"))?;
-    let pairs = loader::parse(&text)?;
-    loader::consume(pairs)
+    loader::parse(&text)
 }
 
 /// Loads the GMPL data file at `path` into an internal representation
@@ -38,8 +37,7 @@ pub fn load_data(path: &str) -> Result<Vec<Entry>> {
     // The grammar expects (at least one) `data;` statement to separate model from data
     // But GMPL allows it to be omitted from a .dat file, so insert it to be safe
     let prefixed = format!("data;\n{text}");
-    let pairs = loader::parse(&prefixed)?;
-    loader::consume(pairs)
+    loader::parse(&prefixed)
 }
 
 /// Load model and data, calling `load_model` and `load_data`.
