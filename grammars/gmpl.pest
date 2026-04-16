@@ -97,8 +97,8 @@ FOR       = { "for" ~ domain ~ "{" ~ for_inner* ~ "}" }
 for_inner = { FOR | PRINT }
 
 // Print (ignored)
-PRINT   = @{ "printf" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
-DISPLAY = @{ "display" ~ (!NEWLINE ~ !";" ~ ANY)* ~ ";" }
+PRINT   = @{ "printf" ~ (!";" ~ ANY)* ~ ";" }
+DISPLAY = @{ "display" ~ (!";" ~ ANY)* ~ ";" }
 
 // Solve (ignored)
 SOLVE = { "solve" ~ ";" }
@@ -111,7 +111,7 @@ TABLE      = { "table" ~ id ~ domain? ~ table_out ~ table_path ~ table_vars ~ ";
 table_out  = { "OUT" ~ string_literal }
 table_path = { "ResultsPath" ~ "&" ~ string_literal }
 table_vars = { ":" ~ table_var ~ ("," ~ table_var)* }
-table_var  = { var_subscripted ~ "~" ~ var_subscripted }
+table_var  = { expr ~ "~" ~ var_subscripted }
 
 // //////////////////////
 // DATA FILES
@@ -177,7 +177,7 @@ domain_var_tuple   = { "(" ~ id ~ ("," ~ id)+ ~ ")" }
 // Uses Pratt parser for proper operator precedence (and > or)
 // Example: Demand[r] <> 0
 logic_expr     =  { logic_primary ~ (logic_infix ~ logic_primary)* }
-logic_primary  = _{ logic_compare | logic_member | logic_subset | logic_compound }
+logic_primary  = _{ logic_compare | logic_member | logic_subset | logic_compound | expr }
 logic_infix    = _{ bool_and | bool_or }
 logic_compare  =  { expr ~ rel_op ~ expr }
 logic_member   =  { set_tuple ~ member_op ~ set_expr }
