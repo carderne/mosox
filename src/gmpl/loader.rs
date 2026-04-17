@@ -35,7 +35,11 @@ fn consume(entries: Pairs<'_, Rule>) -> Result<Vec<Entry>> {
             Rule::OBJECTIVE => result.push(Entry::Objective(ir::Objective::from_entry(entry)?)),
             Rule::CONSTRAINT => result.push(Entry::Constraint(ir::Constraint::from_entry(entry)?)),
             Rule::SET_DATA => result.push(Entry::DataSet(ir::SetData::from_entry(entry)?)),
-            Rule::PARAM_DATA => result.push(Entry::DataParam(ir::ParamData::from_entry(entry)?)),
+            Rule::PARAM_DATA => {
+                for data in ir::ParamData::from_entry_all(entry)? {
+                    result.push(Entry::DataParam(data));
+                }
+            }
             Rule::CHECK => result.push(Entry::Check(ir::Check::from_entry(entry)?)),
             Rule::END
             | Rule::EOI

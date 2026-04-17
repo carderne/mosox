@@ -56,6 +56,11 @@ pub fn create_param(param: ParamWithData) -> Result<Param> {
                     })
                 }
             }
+            ParamDataBody::Tabbing(_) => {
+                // Tabbing is resolved to Plain during model merge; reaching
+                // here means resolve_tabbing was skipped.
+                bail!("internal: unresolved tabbing body reached matrix resolution")
+            }
             ParamDataBody::Tabular(tables) => {
                 let mut arr: HashMap<Index, ParamVal> = HashMap::new();
                 for table in tables {

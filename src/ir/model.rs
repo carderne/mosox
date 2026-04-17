@@ -5,8 +5,9 @@ use lasso::Spur;
 use smallvec::{SmallVec, smallvec};
 
 use crate::ir::{
-    Check, Constraint, ConstraintExpr, Domain, Entry, Expr, ObjSense, Objective, Param,
-    ParamAssign, ParamData, Set, SetData, SetVal, SetValTerminal, SetVals, Var, intern_resolve,
+    Check, Constraint, ConstraintExpr, Domain, DomainPartVar, Entry, Expr, ObjSense, Objective,
+    Param, ParamAssign, ParamData, ParamDataBody, ParamDataPlain, ParamDataPlainValue,
+    ParamDataTarget, ParamVal, Set, SetData, SetVal, SetValTerminal, SetVals, Var, intern_resolve,
     op::RowType,
 };
 
@@ -141,6 +142,7 @@ impl ModelWithData {
         let mut matched_params = Vec::new();
         for data_param in data_params {
             if let Some(param_decl) = param_map.remove(&data_param.name) {
+                let data_param = resolve_tabbing(data_param, &param_decl)?;
                 matched_params.push(ParamWithData {
                     decl: param_decl,
                     data: Some(data_param),
@@ -240,4 +242,88 @@ fn regroup_set_values(values: &SetVals, dimen: usize) -> Result<SetVals> {
         .collect();
 
     Ok(SetVals(tuples))
+}
+
+/// Convert a `ParamDataBody::Tabbing` body into `Plain` using the matched
+/// param's domain arity. Non-tabbing bodies pass through untouched.
+fn resolve_tabbing(mut data: ParamData, decl: &Param) -> Result<ParamData> {
+    let Some(body) = data.body.take() else {
+        return Ok(data);
+    };
+    let tb = match body {
+        ParamDataBody::Tabbing(tb) => tb,
+        other => {
+            data.body = Some(other);
+            return Ok(data);
+        }
+    };
+
+    let parts = decl
+        .domain
+        .as_ref()
+        .map(|d| d.parts.as_slice())
+        .unwrap_or(&[]);
+
+    // Tuple-var domain parts (e.g. `(t, y) in TECH_YEAR`) would make the true
+    // tuple arity > parts.len(), breaking our row chunking. Bail instead of
+    // silently producing wrong data.
+    for part in parts {
+        if matches!(part.var, DomainPartVar::Tuple(_)) {
+            bail!(
+                "tabbing data for param '{}' with tuple-var domain \
+                 (e.g. `(x,y) in SET`) is not supported",
+                intern_resolve(data.name)
+            );
+        }
+    }
+
+    let n = parts.len();
+    let stride = n + tb.num_cols;
+    if stride == 0 || tb.values.len() % stride != 0 {
+        bail!(
+            "tabbing row length mismatch for param '{}': n+k={} does not divide {} values",
+            intern_resolve(data.name),
+            stride,
+            tb.values.len()
+        );
+    }
+
+    let plain: Vec<ParamDataPlain> = tb
+        .values
+        .chunks(stride)
+        .map(|chunk| {
+            let target: Vec<ParamDataTarget> = chunk[..n]
+                .iter()
+                .map(|v| {
+                    Ok(ParamDataTarget::IndexVar(param_val_to_set_val(
+                        *v, data.name,
+                    )?))
+                })
+                .collect::<Result<_>>()?;
+            Ok(ParamDataPlain {
+                target: Some(target),
+                value: ParamDataPlainValue::Scalar(chunk[n + tb.column]),
+            })
+        })
+        .collect::<Result<_>>()?;
+
+    data.body = Some(ParamDataBody::Plain(plain));
+    Ok(data)
+}
+
+fn param_val_to_set_val(v: ParamVal, param_name: lasso::Spur) -> Result<SetVal> {
+    match v {
+        ParamVal::Str(s) => Ok(SetVal::Str(s)),
+        ParamVal::Num(n) => {
+            if n.fract() == 0.0 && n >= 0.0 && n <= u32::MAX as f64 {
+                Ok(SetVal::Int(n as u32))
+            } else {
+                bail!(
+                    "tabbing tuple value for param '{}' is not a valid set index (got {})",
+                    intern_resolve(param_name),
+                    n
+                )
+            }
+        }
+    }
 }

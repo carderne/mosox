@@ -670,6 +670,20 @@ impl ParamDataPlain {
 pub enum ParamDataBody {
     Tabular(Vec<ParamDataTable>),
     Plain(Vec<ParamDataPlain>),
+    /// Raw tabbing-format body; resolved to `Plain` once the param's domain
+    /// arity is known (see `ir::model::resolve_tabbing`).
+    Tabbing(TabbingBody),
+}
+
+#[derive(Clone, Debug)]
+pub struct TabbingBody {
+    /// Which param column this entry owns (0..num_cols-1).
+    pub column: usize,
+    /// Total number of params sharing this tabbing block.
+    pub num_cols: usize,
+    /// Flat row tokens: each row is (n tuple values + num_cols param values).
+    /// The tuple arity n is not known until matched against the param decl.
+    pub values: Vec<ParamVal>,
 }
 
 #[derive(Clone, Debug)]
@@ -680,28 +694,100 @@ pub struct ParamData {
 }
 
 impl ParamData {
-    pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+    /// Produce one or more `ParamData` from a `PARAM_DATA` pair. Record form
+    /// yields one entry; tabbing form yields one entry per param in the header.
+    pub fn from_entry_all(entry: Pair<Rule>) -> Result<Vec<Self>> {
         let mut name: Option<Spur> = None;
         let mut default = None;
         let mut body = None;
+        let mut tabbing: Option<Pair<Rule>> = None;
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
                 Rule::id => name = Some(intern(pair.as_str())),
                 Rule::param_data_default => default = Some(ParamVal::Num(pair.as_str().parse()?)),
-                Rule::param_data_body => {
-                    body = Some(parse_param_data_body(pair)?);
-                }
+                Rule::param_data_body => body = Some(parse_param_data_body(pair)?),
+                Rule::param_data_tabbing => tabbing = Some(pair),
                 _ => {}
             }
         }
 
-        Ok(Self {
+        if let Some(pair) = tabbing {
+            return parse_param_data_tabbing(pair);
+        }
+
+        Ok(vec![Self {
             name: name.context("missing param data name")?,
             default,
             body,
-        })
+        }])
     }
+}
+
+fn parse_param_data_tabbing(pair: Pair<Rule>) -> Result<Vec<ParamData>> {
+    let mut default: Option<ParamVal> = None;
+    let mut set_name: Option<Spur> = None;
+    let mut param_names: Vec<Spur> = Vec::new();
+    let mut values: Vec<ParamVal> = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::param_data_default => {
+                default = Some(ParamVal::Num(inner.as_str().parse()?));
+            }
+            Rule::tabbing_with_set => {
+                for p in inner.into_inner() {
+                    match p.as_rule() {
+                        Rule::tabbing_set => set_name = Some(intern(p.as_str())),
+                        Rule::tabbing_param => param_names.push(intern(p.as_str())),
+                        _ => {}
+                    }
+                }
+            }
+            Rule::tabbing_params => {
+                for p in inner.into_inner() {
+                    if p.as_rule() == Rule::tabbing_param {
+                        param_names.push(intern(p.as_str()));
+                    }
+                }
+            }
+            Rule::tabbing_body => {
+                for v in inner.into_inner() {
+                    if v.as_rule() == Rule::param_data_val {
+                        values.push(ParamVal::from_entry(v)?);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // The `s :` form assigns tuples to set `s` as a side effect. Not currently
+    // wired through to the SetData pipeline, so bail rather than silently drop.
+    if let Some(s) = set_name {
+        bail!(
+            "tabbing data with set side-effect (`param ... : {} : ...`) is not supported",
+            intern_resolve(s)
+        );
+    }
+
+    let k = param_names.len();
+    let mut out = Vec::with_capacity(k);
+    for (j, name) in param_names.into_iter().enumerate() {
+        let body = (!values.is_empty()).then(|| {
+            ParamDataBody::Tabbing(TabbingBody {
+                column: j,
+                num_cols: k,
+                values: values.clone(),
+            })
+        });
+        out.push(ParamData {
+            name,
+            default,
+            body,
+        });
+    }
+    Ok(out)
 }
 
 /// Constraint expression (e.g., "expr <= expr")

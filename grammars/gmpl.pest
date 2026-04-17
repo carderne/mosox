@@ -140,9 +140,25 @@ index       =  { "[" ~ set_val ~ ("," ~ set_val)* ~ "]" }
 index_data  =  { "[" ~ set_val_data ~ ("," ~ set_val_data)* ~ "]" }
 
 // Data: Param
-PARAM_DATA          =  {
-    "param" ~ id ~ domain? ~ ("default" ~ param_data_default)? ~ ":="? ~ param_data_body? ~ ";"
+// Two surface forms from the GMPL spec:
+//   - Record form:  param NAME [domain] [default V] [:= body] ;
+//   - Tabbing form: param [default V] : [s :] p1 [, p2 ...] := rows ;
+// In tabbing form each row is n tuple values followed by k param values
+// (n = set dimension, k = number of params in the header). Commas are
+// optional; row splitting is done by the caller using n and k.
+PARAM_DATA          =  { "param" ~ (param_data_tabbing | param_data_record) ~ ";" }
+param_data_record   = _{
+    id ~ domain? ~ ("default" ~ param_data_default)? ~ ":="? ~ param_data_body?
 }
+param_data_tabbing  =  {
+    ("default" ~ param_data_default)? ~ ":" ~ tabbing_header ~ ":=" ~ tabbing_body?
+}
+tabbing_header      = _{ tabbing_with_set | tabbing_params }
+tabbing_with_set    =  { tabbing_set ~ ":" ~ tabbing_param ~ (","? ~ tabbing_param)* }
+tabbing_params      =  { tabbing_param ~ (","? ~ tabbing_param)* }
+tabbing_set         = @{ id }
+tabbing_param       = @{ id }
+tabbing_body        =  { (","? ~ param_data_val)+ }
 param_data_default  = @{ number }
 param_data_body     = { param_data_symbolic | param_data_matrix+ | param_data_entry+ }
 param_data_entry    = { param_data_target? ~ ":="? ~ (param_data_pair+ | param_data_val) }
