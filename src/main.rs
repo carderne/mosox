@@ -136,6 +136,7 @@ fn run() -> anyhow::Result<()> {
                     println!("... and {} more", diffs.len() - 20);
                 }
                 println!("\n{} total differences", diffs.len());
+                anyhow::bail!("MPS files differ");
             }
             Ok(())
         }

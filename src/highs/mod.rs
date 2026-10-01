@@ -3,7 +3,7 @@ pub mod format;
 pub mod output;
 
 use anyhow::Result;
-use highs::{ColProblem, Row, Sense};
+use highs::{ColProblem, HighsModelStatus, Row, Sense};
 use indexmap::IndexMap;
 
 use crate::{
@@ -101,6 +101,11 @@ pub fn highs_solve(
     apply_options(&mut model, config)?;
 
     let solved_model = model.solve();
+    anyhow::ensure!(
+        solved_model.status() == HighsModelStatus::Optimal,
+        "HiGHS did not find an optimal solution: {:?}",
+        solved_model.status()
+    );
     let objective_value = solved_model.objective_value();
     let solution = solved_model.get_solution();
 
@@ -119,8 +124,8 @@ pub fn highs_solve(
 
     let variables: Vec<SolutionRow> = cols
         .iter()
-        .zip(solution.columns())
-        .zip(solution.dual_columns())
+        .zip(solution.columns().iter().skip(1))
+        .zip(solution.dual_columns().iter().skip(1))
         .map(|(((spur, var_idx), value), marginal)| SolutionRow {
             name: format_name(*spur, var_idx),
             value: *value,
