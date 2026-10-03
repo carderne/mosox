@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn test_parse() {
         let text = r#"set YEAR;"#;
-        let _entries = parse(&text);
+        let _entries = parse(text);
     }
 
     #[test]
@@ -77,7 +77,7 @@ mod tests {
         let text = r#"
             INVALID MODEL STUFF
         "#;
-        let entries = parse(&text).unwrap();
+        let entries = parse(text).unwrap();
         assert!(entries.len() == 1);
     }
 
@@ -86,6 +86,6 @@ mod tests {
         let text = r#"
             param DiscountRate{r in REGION};
         "#;
-        parse(&text).unwrap();
+        parse(text).unwrap();
     }
 }
