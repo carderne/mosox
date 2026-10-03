@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use MOSOX, please cite this software release."
+type: software
+title: "MOSOX: LP matrix generator for GMPL"
+authors:
+  - given-names: Chris
+    family-names: Arderne
+    orcid: "https://orcid.org/0000-0002-7904-2216"
+version: 0.6.3
+date-released: 2026-09-26
+license: MIT
+repository-code: "https://github.com/carderne/mosox"
+url: "https://rdrn.me/mosox/"
+keywords:
+  - optimisation
+  - GMPL
+  - linear programming
+  - mixed-integer programming
