@@ -85,7 +85,7 @@ struct Stats {
     max: Duration,
 }
 
-fn compute_stats(durations: &mut Vec<Duration>) -> Stats {
+fn compute_stats(durations: &mut [Duration]) -> Stats {
     durations.sort();
     let n = durations.len();
     let median = if n % 2 == 1 {
