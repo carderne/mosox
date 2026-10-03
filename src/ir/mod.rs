@@ -978,15 +978,13 @@ impl ParamDataRow {
 
         for pair in entry.into_inner() {
             match pair.as_rule() {
-                Rule::set_val_data => {
-                    if label.is_none() {
-                        let raw = pair.as_str();
-                        label = Some(
-                            raw.parse::<u32>()
-                                .map(SetVal::Int)
-                                .unwrap_or_else(|_| SetVal::Str(intern(raw))),
-                        );
-                    }
+                Rule::set_val_data if label.is_none() => {
+                    let raw = pair.as_str();
+                    label = Some(
+                        raw.parse::<u32>()
+                            .map(SetVal::Int)
+                            .unwrap_or_else(|_| SetVal::Str(intern(raw))),
+                    );
                 }
                 Rule::param_data_row_vals => {
                     for inner in pair.into_inner() {
