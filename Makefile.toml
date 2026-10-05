@@ -36,7 +36,7 @@ command = "cargo"
 args = ["test", "--release", "--test", "bench_perf", "--", "--ignored", "--nocapture"]
 
 [tasks.benchglpsol]
-env = { MOSOX_TEST_LARGE = "1", MOSOX_BENCH_GLPSOL = "1" }
+env = { MOSOX_BENCH_GLPSOL = "1" }
 command = "cargo"
 args = ["test", "--release", "--test", "bench_perf", "--", "--ignored", "--nocapture"]
 
