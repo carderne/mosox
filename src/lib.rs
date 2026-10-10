@@ -9,6 +9,8 @@ mod ir;
 mod matrix;
 mod mps;
 pub mod normalize;
+#[cfg(feature = "python")]
+mod python;
 
 use std::path::Path;
 use std::time::Instant;

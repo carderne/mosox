@@ -13,7 +13,7 @@ use crate::{
 };
 
 pub struct SolutionRow {
-    pub name: String,
+    pub id: VarId,
     pub value: f64,
     pub marginal: f64,
 }
@@ -115,8 +115,8 @@ pub fn highs_solve(
         .keys()
         .zip(solution.rows())
         .zip(solution.dual_rows())
-        .map(|(((spur, con_idx), value), marginal)| SolutionRow {
-            name: format_name(*spur, con_idx),
+        .map(|((id, value), marginal)| SolutionRow {
+            id: id.clone(),
             value: *value,
             marginal: *marginal,
         })
@@ -126,8 +126,8 @@ pub fn highs_solve(
         .iter()
         .zip(solution.columns().iter().skip(1))
         .zip(solution.dual_columns().iter().skip(1))
-        .map(|(((spur, var_idx), value), marginal)| SolutionRow {
-            name: format_name(*spur, var_idx),
+        .map(|((id, value), marginal)| SolutionRow {
+            id: id.clone(),
             value: *value,
             marginal: *marginal,
         })

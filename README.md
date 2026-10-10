@@ -83,6 +83,19 @@ mosox solve examples/basic/model.mod -o output.txt
 # Results output to f.txt
 ```
 
+### Python
+Data can be passed from Python as pandas DataFrames (or Series, or pyarrow Tables) instead of a `.dat` file.
+Columns are read by position: for a param, the index columns then the value; for a set, the index columns (if indexed) then the members.
+```python
+import pandas as pd
+import mosox
+
+model = mosox.Model.from_file("examples/2d_params/model.mod")
+solution = model.solve({"supply": pd.DataFrame({"plant": ["P1", "P2"], "value": [100, 150]}), ...})
+solution.objective
+solution["ship"]  # DataFrame with columns p, w, value, marginal
+```
+
 
 ## Development
 Please install [cargo-make](https://github.com/sagiegurari/cargo-make):
@@ -109,6 +122,12 @@ cargo make test
 This will additionally run a regression test against `examples/osemosys_large` if present.
 ```bash
 cargo make testlarge
+```
+
+### Python bindings
+Requires [uv](https://docs.astral.sh/uv/). `uv run` builds the extension (unoptimised) as needed.
+```bash
+cargo make py  # ruff format, ruff check, ty check, pytest
 ```
 
 ## Benchmarks

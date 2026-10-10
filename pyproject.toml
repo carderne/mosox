@@ -1,0 +1,68 @@
+[project]
+name = "mosox"
+description = "LP matrix generator for GMPL"
+authors = [{ name = "Chris Arderne", email = "chris@rdrn.me" }]
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dynamic = ["version"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Rust",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: Implementation :: CPython",
+]
+dependencies = [
+  "pandas>=2.2",
+  "pyarrow>=16",
+]
+
+[project.urls]
+homepage = "https://github.com/carderne/mosox"
+repository = "https://github.com/carderne/mosox"
+
+[dependency-groups]
+dev = [
+  "maturin>=1.9,<2",
+  "pandas-stubs",
+  "pytest",
+  "ruff",
+  "ty",
+]
+
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+python-source = "python"
+module-name = "mosox._mosox"
+features = ["python", "pyo3/extension-module"]
+profile = "release-py"
+
+[tool.uv]
+# Fast unoptimised builds for local development (wheels for release use `profile` above)
+config-settings = { build-args = "--profile=dev" }
+# Rebuild the extension when the Rust side changes
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "Cargo.toml" },
+  { file = "src/**/*.rs" },
+  { file = "grammars/*.pest" },
+]
+
+[tool.ruff]
+include = ["python/**/*.py", "python/**/*.pyi"]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["A", "ANN", "E", "F", "I", "N", "Q", "UP", "T100"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mosox"]
+
+[tool.ty.src]
+include = ["python"]
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]

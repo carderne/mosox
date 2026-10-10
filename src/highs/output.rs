@@ -5,7 +5,7 @@ use std::io::Write;
 use crate::highs::format::Format;
 use crate::ir::interner::intern_resolve;
 
-use super::SolutionData;
+use super::{SolutionData, SolutionRow};
 
 pub fn write_solution(data: SolutionData, format: Format, output: &std::path::Path) {
     let file = std::fs::File::create(output).expect("cannot create output file");
@@ -24,7 +24,9 @@ fn write_txt(w: &mut impl Write, data: SolutionData) {
         let _ = writeln!(
             w,
             "{} = {:.3}; marginal = {:.3}",
-            row.name, row.value, row.marginal
+            row.name(),
+            row.value,
+            row.marginal
         );
     }
 
@@ -33,7 +35,9 @@ fn write_txt(w: &mut impl Write, data: SolutionData) {
         let _ = writeln!(
             w,
             "{} = {:.3}; marginal = {:.3}",
-            row.name, row.value, row.marginal
+            row.name(),
+            row.value,
+            row.marginal
         );
     }
 }
@@ -49,11 +53,19 @@ fn write_csv(w: &mut impl Write, data: SolutionData) {
         let _ = writeln!(
             w,
             "constraint,{},{:.3},{:.3}",
-            row.name, row.value, row.marginal
+            row.name(),
+            row.value,
+            row.marginal
         );
     }
     for row in &data.variables {
-        let _ = writeln!(w, "var,{},{:.3},{:.3}", row.name, row.value, row.marginal);
+        let _ = writeln!(w, "var,{},{:.3},{:.3}", row.name(), row.value, row.marginal);
+    }
+}
+
+impl SolutionRow {
+    fn name(&self) -> String {
+        format_name(self.id.0, &self.id.1)
     }
 }
 

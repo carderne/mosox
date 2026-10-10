@@ -73,3 +73,11 @@ dependencies = ["gen-cov"]
 command = "open"
 args = ["target/coverage/index.html"]
 
+# Python bindings
+[tasks.py]
+script = '''
+uv run ruff format python
+uv run ruff check --fix python
+uv run ty check
+uv run pytest
+'''

@@ -71,5 +71,6 @@ docs/_build/
 # VSCode
 .vscode/
 
-# Pyenv
-.python-version
+
+# Python extension build output
+python/mosox/*.so

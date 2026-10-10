@@ -17,11 +17,17 @@ itertools = "0.14.0"
 lasso = { version = "0.7.3", features = ["multi-threaded"] }
 pest = "2.8.3"
 pest_derive = "2.8.3"
+pyo3 = { version = "0.29", features = ["abi3-py311"], optional = true }
+pyo3-arrow = { version = "0.19", optional = true }
 rayon = "1.11.0"
 smallvec = "1.15.1"
 
+[features]
+python = ["dep:pyo3", "dep:pyo3-arrow"]
+
 [lib]
 name = "mosox"
+crate-type = ["cdylib", "lib"]
 
 [[bin]]
 name = "mosox"
@@ -39,3 +45,8 @@ panic = "abort"
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "2.1"
+
+# Python bindings: unwind so Rust panics become Python exceptions
+[profile.release-py]
+inherits = "release"
+panic = "unwind"
