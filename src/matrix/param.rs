@@ -4,11 +4,13 @@ use anyhow::{Result, bail};
 
 use crate::ir::model::ParamWithData;
 use crate::ir::{
-    Expr, Index, ParamAssign, ParamDataBody, ParamDataPlainValue, ParamDataTarget, ParamVal, SetVal,
+    self, Expr, Index, ParamAssign, ParamDataBody, ParamDataPlainValue, ParamDataTarget, ParamVal,
+    SetVal,
 };
 
 #[derive(Debug, Clone)]
 pub struct Param {
+    pub decl: ir::Param,
     pub data: ParamValEnum,
     pub default: Option<Expr>,
 }
@@ -22,77 +24,69 @@ pub enum ParamValEnum {
 
 pub fn create_param(param: ParamWithData) -> Result<Param> {
     let default = resolve_param_default(&param)?;
-    if let Some(data) = param.data
-        && let Some(body) = data.body
-    {
-        match body {
-            ParamDataBody::Plain(plain_entries) => {
-                if plain_entries.is_empty() {
-                    Ok(Param {
-                        data: ParamValEnum::None,
-                        default,
-                    })
-                } else {
-                    let mut arr: HashMap<Index, ParamVal> = HashMap::new();
-                    for entry in plain_entries {
-                        let target_idxs = param_target_to_index(entry.target);
-                        match entry.value {
-                            ParamDataPlainValue::Scalar(val) => {
-                                arr.insert(target_idxs.into(), val);
-                            }
-                            ParamDataPlainValue::Pairs(pairs) => {
-                                for pair in pairs {
-                                    arr.insert(
-                                        [target_idxs.clone(), vec![pair.key]].concat().into(),
-                                        pair.value,
-                                    );
-                                }
-                            }
-                        }
+    let ParamWithData { mut decl, data } = param;
+    let data = if let Some(body) = data.and_then(|d| d.body) {
+        body_to_data(body)?
+    } else if let Some(ParamAssign::Expr(expr)) = decl.assign.take() {
+        ParamValEnum::Expr(expr)
+    } else {
+        ParamValEnum::None
+    };
+    // Inline data has already been moved into `data`
+    decl.assign = None;
+    Ok(Param {
+        decl,
+        data,
+        default,
+    })
+}
+
+fn body_to_data(body: ParamDataBody) -> Result<ParamValEnum> {
+    let mut arr: HashMap<Index, ParamVal> = HashMap::new();
+    match body {
+        ParamDataBody::Plain(plain_entries) => {
+            if plain_entries.is_empty() {
+                return Ok(ParamValEnum::None);
+            }
+            for entry in plain_entries {
+                let target_idxs = param_target_to_index(entry.target);
+                match entry.value {
+                    ParamDataPlainValue::Scalar(val) => {
+                        arr.insert(target_idxs.into(), val);
                     }
-                    Ok(Param {
-                        data: ParamValEnum::Arr(arr),
-                        default,
-                    })
-                }
-            }
-            ParamDataBody::Tabbing(_) => {
-                // Tabbing is resolved to Plain during model merge; reaching
-                // here means resolve_tabbing was skipped.
-                bail!("internal: unresolved tabbing body reached matrix resolution")
-            }
-            ParamDataBody::Tabular(tables) => {
-                let mut arr: HashMap<Index, ParamVal> = HashMap::new();
-                for table in tables {
-                    let target_idxs = param_target_to_index(table.target);
-                    for row in table.rows {
-                        for (col, value) in table.cols.iter().zip(row.values.iter()) {
+                    ParamDataPlainValue::Pairs(pairs) => {
+                        for pair in pairs {
                             arr.insert(
-                                [target_idxs.clone(), vec![row.label.clone(), col.clone()]]
-                                    .concat()
-                                    .into(),
-                                *value,
+                                [target_idxs.clone(), vec![pair.key]].concat().into(),
+                                pair.value,
                             );
                         }
                     }
                 }
-                Ok(Param {
-                    data: ParamValEnum::Arr(arr),
-                    default,
-                })
             }
         }
-    } else if let Some(ParamAssign::Expr(expr)) = param.decl.assign {
-        Ok(Param {
-            data: ParamValEnum::Expr(expr),
-            default,
-        })
-    } else {
-        Ok(Param {
-            data: ParamValEnum::None,
-            default,
-        })
+        ParamDataBody::Tabbing(_) => {
+            // Tabbing is resolved to Plain during model merge; reaching
+            // here means resolve_tabbing was skipped.
+            bail!("internal: unresolved tabbing body reached matrix resolution")
+        }
+        ParamDataBody::Tabular(tables) => {
+            for table in tables {
+                let target_idxs = param_target_to_index(table.target);
+                for row in table.rows {
+                    for (col, value) in table.cols.iter().zip(row.values.iter()) {
+                        arr.insert(
+                            [target_idxs.clone(), vec![row.label.clone(), col.clone()]]
+                                .concat()
+                                .into(),
+                            *value,
+                        );
+                    }
+                }
+            }
+        }
     }
+    Ok(ParamValEnum::Arr(arr))
 }
 
 fn param_target_to_index(target: Option<Vec<ParamDataTarget>>) -> Vec<SetVal> {

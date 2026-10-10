@@ -310,27 +310,11 @@ pub fn check_logic_condition(
             let rhs = recurse(rhs, lookups, idx_val_map)?;
 
             // no algebra allowed here!
-            let lhs_num = resolve_terms_to_term(&lhs)?;
-            let rhs_num = resolve_terms_to_term(&rhs)?;
-
-            Ok(match (lhs_num, rhs_num) {
-                (Term::Num(lhs), Term::Num(rhs)) => match op {
-                    RelOp::Eq => lhs == rhs,
-                    RelOp::EqEq => lhs == rhs,
-                    RelOp::Ne => lhs != rhs,
-                    RelOp::Ne2 => lhs != rhs,
-                    RelOp::Gt => lhs > rhs,
-                    RelOp::Ge => lhs >= rhs,
-                    RelOp::Lt => lhs < rhs,
-                    RelOp::Le => lhs <= rhs,
-                },
-                (Term::Str(lhs), Term::Str(rhs)) => match op {
-                    RelOp::Eq => lhs == rhs,
-                    RelOp::Ne => lhs != rhs,
-                    _ => bail!("Can only do string == or != in logic expression"),
-                },
-                _ => bail!("Vars or mixed terms in domain condition"),
-            })
+            compare_terms(
+                resolve_terms_to_term(&lhs)?,
+                op,
+                resolve_terms_to_term(&rhs)?,
+            )
         }
         LogicExpr::Membership { lhs, op, rhs } => {
             let rhs = resolve_set_expr(rhs, idx_val_map, lookups)?;
@@ -356,6 +340,27 @@ pub fn check_logic_condition(
             })
         }
     }
+}
+
+pub fn compare_terms(lhs: Term, op: &RelOp, rhs: Term) -> Result<bool> {
+    Ok(match (lhs, rhs) {
+        (Term::Num(lhs), Term::Num(rhs)) => match op {
+            RelOp::Eq => lhs == rhs,
+            RelOp::EqEq => lhs == rhs,
+            RelOp::Ne => lhs != rhs,
+            RelOp::Ne2 => lhs != rhs,
+            RelOp::Gt => lhs > rhs,
+            RelOp::Ge => lhs >= rhs,
+            RelOp::Lt => lhs < rhs,
+            RelOp::Le => lhs <= rhs,
+        },
+        (Term::Str(lhs), Term::Str(rhs)) => match op {
+            RelOp::Eq => lhs == rhs,
+            RelOp::Ne => lhs != rhs,
+            _ => bail!("Can only do string == or != in logic expression"),
+        },
+        _ => bail!("Vars or mixed terms in domain condition"),
+    })
 }
 
 fn expand_sum(
@@ -392,7 +397,7 @@ pub fn resolve_terms_to_num(terms: &[Term]) -> Result<Option<f64>> {
     Ok(Some(sum))
 }
 
-fn resolve_terms_to_term(terms: &[Term]) -> Result<Term> {
+pub fn resolve_terms_to_term(terms: &[Term]) -> Result<Term> {
     if terms.is_empty() {
         bail!("empty domain condition on one side");
     }
@@ -473,6 +478,7 @@ pub fn get_index_map(parts: &[DomainPart], idx: &[SetVal]) -> Result<IdxValMap> 
         .zip(idx.iter().cloned())
         .map(|(part, idx_val)| -> Result<SmallVec<[(Spur, SetVal); 4]>> {
             Ok(match (&part.var, &idx_val) {
+                (DomainPartVar::None, _) => smallvec::smallvec![],
                 (DomainPartVar::Single(s), val) => smallvec::smallvec![(*s, val.clone())],
                 (DomainPartVar::Tuple(vars), SetVal::Tuple(vals)) => vars
                     .iter()

@@ -165,13 +165,11 @@ It is intended that all of these will ultimately be supported, and most of them 
 - These logical operators: `not`
 
 ### Sets
-- `within` (parsed, not enforced)
-- `dimen` (parsed, not enforced)
+- `within` and `dimen` are only enforced on explicit data, not on sets computed from expressions
 
 ### Parameters
-- Relational condition (parsed, not enforced)
-- Superset expression (parsed, not enforced)
-- Type specifier (integer, binary, symbolic) (parsed, not enforced)
+- Type specifiers, relational conditions and superset (`in`) expressions are only enforced on explicit data and constant defaults, not on computed params (`:=` expressions) or expression defaults
+- Plain-format data for multi-dimensional params without a slice (eg `param p := a x 1 b y 2;`) is not supported (it is caught as out-of-domain data)
 
 ### Variables
 - Bounds specified as expressions (currently only constant accepted)

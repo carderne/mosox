@@ -22,8 +22,8 @@ use crate::{
 };
 
 pub struct SetCont {
-    decl: ir::Set,
-    data: HashMap<Index, SetVals>,
+    pub decl: ir::Set,
+    pub data: HashMap<Index, SetVals>,
 }
 
 impl From<SetWithData> for SetCont {
@@ -349,10 +349,10 @@ mod tests {
         SetWithData {
             decl: ir::Set {
                 name: intern(name),
+                line_no: 0,
                 domain: Domain::default(),
                 dimen: None,
-                within: None,
-                cross: None,
+                within: vec![],
                 expr: None,
                 inline_data: None,
                 default: None,

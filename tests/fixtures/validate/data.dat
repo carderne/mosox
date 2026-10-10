@@ -1,0 +1,15 @@
+set I := a b;
+set J := p q;
+set P := (a,p) (b,q);
+set S[a] := p;
+set S[b] := p q;
+set T := (a,p);
+
+param cap := 10;
+param n := a 1 b 2;
+param b := a 0 b 1;
+param lim := a 1 b 0;
+param name := a p b q;
+param r := [a,*] p 1 [b,*] q 2;
+
+end;

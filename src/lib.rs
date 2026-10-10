@@ -20,6 +20,7 @@ use crate::highs::highs_solve;
 use crate::highs::output::write_solution;
 use crate::ir::Entry;
 use crate::ir::model::ModelWithData;
+pub use crate::matrix::GenOptions;
 use crate::matrix::{Compiled, gen_matrix};
 use crate::mps::output::{print_mps, write_mps_to_file};
 
@@ -60,12 +61,10 @@ pub fn merge_model(entries: Vec<Entry>) -> Result<ModelWithData> {
 }
 
 /// Convert merged model to matrix.
-///
-/// If `prune` is set, vars with no nonzero coefficients are dropped (as GLPK does).
-pub fn generate_matrix(model: ModelWithData, prune: bool) -> Result<Compiled> {
+pub fn generate_matrix(model: ModelWithData, opts: &GenOptions) -> Result<Compiled> {
     eprintln!("Generating matrix");
     let t0 = Instant::now();
-    let compiled = gen_matrix(model, prune)?;
+    let compiled = gen_matrix(model, opts)?;
     eprintln!("Matrix compiled in {:?}", t0.elapsed());
 
     let num_rows = compiled.cons.len();

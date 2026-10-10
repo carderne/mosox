@@ -46,7 +46,7 @@ PARAM           =  { "param" ~ name ~ alias? ~ domain? ~ (","? ~ param_attrib)* 
 param_attrib    = _{ param_type | param_condition | param_in | param_default }
 param_type      =  { "integer" | "binary" | "symbolic" }
 param_condition =  { rel_op ~ expr }
-param_in        =  { "in" ~ expr }
+param_in        =  { "in" ~ set_expr }
 param_assign    =  { ":=" ~ expr }
 param_default   =  { "default" ~ (expr | string_literal) }
 
@@ -72,9 +72,7 @@ set_tuple        = { "(" ~ set_val ~ ("," ~ set_val)+ ~ ")" }
 set_vals         = { (","? ~ set_val)+ }
 set_val          = { id | int }
 
-set_within      =  { "within" ~ (id | domain) ~ ("cross" ~ cross_set)* }
-within_set      = @{ id }
-cross_set       = @{ id }
+set_within      =  { "within" ~ set_expr ~ ("cross" ~ set_expr)* }
 
 // Constraint
 // Example: s.t. Capacity{r in REGION}: NewCap[r] = 2

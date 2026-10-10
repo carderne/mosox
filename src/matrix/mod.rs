@@ -1,8 +1,8 @@
-mod check;
 mod constraint;
 mod lookup;
 mod param;
 mod set;
+mod validate;
 
 use std::sync::Arc;
 
@@ -15,9 +15,9 @@ use smallvec::SmallVec;
 use crate::ir::model::{ConstraintOrObjective, ModelWithData};
 use crate::ir::op::{Bounds, RowType};
 use crate::ir::{Index, ObjSense, VarType};
-use crate::matrix::check::check_checks;
 use crate::matrix::constraint::{Pair, algebra, domain_to_indexes, get_index_map, recurse};
 use crate::matrix::lookup::Lookups;
+use crate::matrix::validate::validate;
 
 pub type ConId = (Spur, Arc<Index>);
 pub type VarId = (Spur, Arc<Index>);
@@ -41,9 +41,14 @@ pub struct Compiled {
     pub cons: ConsMap, // rows
 }
 
-/// If `prune` is set, zero coefficients and vars with no nonzero coefficients are
-/// dropped (matching GLPK, which only creates columns for vars with nonzero terms).
-pub fn gen_matrix(model: ModelWithData, prune: bool) -> Result<Compiled> {
+pub struct GenOptions {
+    /// Drop zero coefficients and vars with no nonzero coefficients (as GLPK does)
+    pub prune: bool,
+    /// Enforce check statements and set/param declaration constraints on the data
+    pub check: bool,
+}
+
+pub fn gen_matrix(model: ModelWithData, opts: &GenOptions) -> Result<Compiled> {
     let ModelWithData {
         sense,
         sets,
@@ -53,10 +58,12 @@ pub fn gen_matrix(model: ModelWithData, prune: bool) -> Result<Compiled> {
         constraints,
     } = model;
     let lookups = Lookups::from_model(sets, vars, pars)?;
-    check_checks(checks, &lookups)?;
+    if opts.check {
+        validate(&checks, &lookups)?;
+    }
     let cons = build_constraints(constraints, &lookups)?;
     let mut compiled = build_cols_and_rows(sense, cons, &lookups)?;
-    if prune {
+    if opts.prune {
         prune_zeros(&mut compiled.vars);
     }
     Ok(compiled)

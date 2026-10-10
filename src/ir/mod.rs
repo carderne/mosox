@@ -96,16 +96,18 @@ pub enum ParamAssign {
 #[derive(Clone, Debug)]
 pub struct Param {
     pub name: Spur,
+    pub line_no: usize,
     pub domain: Option<Domain>,
     pub param_type: ParamType,
     pub conditions: Vec<ParamCondition>,
-    pub param_in: Option<Expr>,
+    pub param_in: Option<SetExpr>,
     pub default: Option<Expr>,
     pub assign: Option<ParamAssign>,
 }
 
 impl Param {
     pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        let (line_no, _) = entry.line_col();
         let mut name: Option<Spur> = None;
         let mut domain = None;
         let mut param_type = ParamType::default();
@@ -121,7 +123,11 @@ impl Param {
                 Rule::param_type => param_type = ParamType::from_entry(pair)?,
                 Rule::param_condition => conditions.push(ParamCondition::from_entry(pair)?),
                 Rule::param_in => {
-                    param_in = pair.into_inner().next().map(Expr::from_entry).transpose()?;
+                    param_in = pair
+                        .into_inner()
+                        .next()
+                        .map(SetExpr::from_entry)
+                        .transpose()?;
                 }
                 Rule::param_default => {
                     if let Some(p) = pair
@@ -147,6 +153,7 @@ impl Param {
 
         Ok(Self {
             name: name.context("missing param name")?,
+            line_no,
             domain,
             param_type,
             conditions,
@@ -168,10 +175,11 @@ pub enum SetValue {
 #[derive(Clone, Debug)]
 pub struct Set {
     pub name: Spur,
+    pub line_no: usize,
     pub domain: Domain,
     pub dimen: Option<u32>,
-    pub within: Option<String>,
-    pub cross: Option<String>,
+    /// Factors of `within A cross B ...`
+    pub within: Vec<SetExpr>,
     pub expr: Option<SetExpr>,
     pub inline_data: Option<SetVals>,
     pub default: Option<SetValue>,
@@ -179,11 +187,11 @@ pub struct Set {
 
 impl Set {
     pub fn from_entry(entry: Pair<Rule>) -> Result<Self> {
+        let (line_no, _) = entry.line_col();
         let mut name: Option<Spur> = None;
         let mut domain = Domain::default();
         let mut dimen = None;
-        let mut within = None;
-        let mut cross = None;
+        let mut within = Vec::new();
         let mut expr = None;
         let mut inline_data = None;
         let mut default = None;
@@ -200,13 +208,10 @@ impl Set {
                             dimen = Some(int_pair.as_str().parse()?);
                         }
                         Rule::set_within => {
-                            for p in inner.into_inner() {
-                                match p.as_rule() {
-                                    Rule::within_set => within = Some(p.as_str().to_string()),
-                                    Rule::cross_set => cross = Some(p.as_str().to_string()),
-                                    _ => {}
-                                }
-                            }
+                            within = inner
+                                .into_inner()
+                                .map(SetExpr::from_entry)
+                                .collect::<Result<_>>()?;
                         }
                         Rule::set_assign => {
                             let assign_inner =
@@ -238,10 +243,10 @@ impl Set {
 
         Ok(Self {
             name: name.context("missing set name")?,
+            line_no,
             domain,
             dimen,
             within,
-            cross,
             expr,
             inline_data,
             default,
@@ -547,7 +552,7 @@ impl Constraint {
 /// Check statement
 #[derive(Clone, Debug)]
 pub struct Check {
-    pub line_no: i32,
+    pub line_no: usize,
     pub domain: Option<Domain>,
     pub expr: LogicExpr,
 }
@@ -567,7 +572,7 @@ impl Check {
         }
 
         Ok(Self {
-            line_no: line_no as i32,
+            line_no,
             domain,
             expr: expr.context("missing check expr")?,
         })
@@ -1414,6 +1419,21 @@ impl RelOp {
             ">=" => RelOp::Ge,
             ">" => RelOp::Gt,
             _ => RelOp::Eq,
+        })
+    }
+}
+
+impl fmt::Display for RelOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match self {
+            RelOp::Lt => "<",
+            RelOp::Le => "<=",
+            RelOp::Eq => "=",
+            RelOp::EqEq => "==",
+            RelOp::Ne => "<>",
+            RelOp::Ne2 => "!=",
+            RelOp::Ge => ">=",
+            RelOp::Gt => ">",
         })
     }
 }
