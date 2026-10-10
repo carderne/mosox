@@ -11,14 +11,14 @@ use crate::{
     matrix::{Compiled, ConsMap, VarsMap},
 };
 
-pub fn print_mps(compiled: Compiled, model_name: &str) {
+pub fn print_mps(compiled: &Compiled, model_name: &str) {
     let stdout = std::io::stdout();
     let w = BufWriter::with_capacity(256 * 1024, stdout.lock());
     write_mps(compiled, model_name, w);
 }
 
 pub fn write_mps_to_file(
-    compiled: Compiled,
+    compiled: &Compiled,
     model_name: &str,
     path: &std::path::Path,
 ) -> std::io::Result<()> {
@@ -28,7 +28,7 @@ pub fn write_mps_to_file(
     Ok(())
 }
 
-fn write_mps(compiled: Compiled, model_name: &str, mut w: impl Write) {
+pub fn write_mps(compiled: &Compiled, model_name: &str, mut w: impl Write) {
     writeln!(w, "NAME {model_name}").unwrap();
     write_con_rows(&mut w, &compiled.cons);
     write_var_cols(&mut w, &compiled.vars);

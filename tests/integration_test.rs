@@ -1,6 +1,6 @@
-use mosox::load_model;
+use mosox::Model;
 
 #[test]
 fn test_load() {
-    load_model("examples/osemosys_small/osemosys.mod").unwrap();
+    Model::from_file("examples/osemosys_small/osemosys.mod").unwrap();
 }

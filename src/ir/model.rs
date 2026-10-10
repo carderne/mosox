@@ -1,31 +1,14 @@
-use std::collections::HashMap;
-
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use lasso::Spur;
-use smallvec::{SmallVec, smallvec};
+use smallvec::smallvec;
 
+use crate::data::{DatSource, DataSource};
+use crate::gmpl::loader;
 use crate::ir::{
-    Check, Constraint, ConstraintExpr, Domain, DomainPartVar, Entry, Expr, ObjSense, Objective,
-    Param, ParamAssign, ParamData, ParamDataBody, ParamDataPlain, ParamDataPlainValue,
-    ParamDataTarget, ParamVal, Set, SetData, SetVal, SetValTerminal, SetVals, Var, intern_resolve,
-    op::RowType,
+    Check, Constraint, ConstraintExpr, Domain, Entry, Expr, ObjSense, Objective, Param,
+    ParamAssign, ParamData, Set, SetData, Var, op::RowType,
 };
-
-/// A set declaration with optional data
-#[derive(Clone, Debug)]
-pub struct SetWithData {
-    pub decl: Set,
-    /// Sets with indices, eg TIMESLICE[y] will have multiple data entries,
-    /// one for each y
-    pub data: Vec<SetData>,
-}
-
-/// A parameter declaration with optional data
-#[derive(Clone, Debug)]
-pub struct ParamWithData {
-    pub decl: Param,
-    pub data: Option<ParamData>,
-}
+use crate::matrix::{Compiled, GenOptions, gen_matrix};
 
 #[derive(Clone, Debug)]
 pub struct ConstraintOrObjective {
@@ -36,30 +19,36 @@ pub struct ConstraintOrObjective {
     pub rhs: Expr,
 }
 
-#[derive(Clone, Debug)]
-pub struct ModelWithData {
+/// A parsed model: declarations, plus any data given in the model file itself.
+/// Can be compiled repeatedly against different data.
+pub struct Model {
     pub sense: ObjSense,
-    pub sets: Vec<SetWithData>,
+    pub sets: Vec<Set>,
+    pub params: Vec<Param>,
     pub vars: Vec<Var>,
-    pub pars: Vec<ParamWithData>,
     pub checks: Vec<Check>,
     pub constraints: Vec<ConstraintOrObjective>,
+    /// Data from the model file, used for anything the compile-time source doesn't provide
+    pub data: DatSource,
 }
 
-impl ModelWithData {
-    /// Build a ModelWithData from a list of entries, matching data to model statements
-    pub fn from_entries(entries: Vec<Entry>) -> Result<Self> {
+impl Model {
+    pub fn from_file(path: &str) -> Result<Self> {
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("Cannot read file: {path}"))?;
+        Self::parse(&text)
+    }
+
+    pub fn parse(text: &str) -> Result<Self> {
         let mut objective = None;
         let mut sets = Vec::new();
         let mut params = Vec::new();
         let mut vars = Vec::new();
         let mut checks = Vec::new();
         let mut constraints = Vec::new();
-        let mut data_sets = Vec::new();
-        let mut data_params = Vec::new();
+        let mut data = DatSource::default();
 
-        // First pass: separate model and data entries
-        for entry in entries {
+        for entry in loader::parse(text)? {
             match entry {
                 Entry::Objective(obj) => {
                     if objective.is_some() {
@@ -67,115 +56,50 @@ impl ModelWithData {
                     }
                     objective = Some(obj);
                 }
-                Entry::Set(set) => sets.push(set),
-                Entry::Param(param) => params.push(param),
+                Entry::Set(mut set) => {
+                    if let Some(values) = set.inline_data.take() {
+                        data.add_set(SetData {
+                            name: set.name,
+                            index: smallvec![],
+                            values,
+                        });
+                    }
+                    sets.push(*set);
+                }
+                Entry::Param(mut param) => {
+                    match param.assign.take() {
+                        Some(ParamAssign::Data(body)) => data.add_param(ParamData {
+                            name: param.name,
+                            default: None,
+                            body: Some(body),
+                        })?,
+                        assign => param.assign = assign,
+                    }
+                    params.push(param);
+                }
                 Entry::Var(var) => vars.push(var),
                 Entry::Check(check) => checks.push(check),
                 Entry::Constraint(constraint) => constraints.push(constraint),
-                Entry::DataSet(data_set) => data_sets.push(data_set),
-                Entry::DataParam(data_param) => data_params.push(data_param),
+                Entry::DataSet(set_data) => data.add_set(set_data),
+                Entry::DataParam(param_data) => data.add_param(param_data)?,
             }
         }
 
-        // Convert inline set data to SetData entries
-        for set in &sets {
-            if let Some(ref inline_data) = set.inline_data {
-                data_sets.push(SetData {
-                    name: set.name,
-                    index: smallvec![],
-                    values: inline_data.clone(),
-                });
-            }
-        }
-
-        // Convert inline param data to ParamData entries
-        for param in &params {
-            if let Some(ParamAssign::Data(ref body)) = param.assign {
-                data_params.push(ParamData {
-                    name: param.name,
-                    default: None,
-                    body: Some(body.clone()),
-                });
-            }
-        }
-
-        // Group data sets by name
-        let mut data_set_map: HashMap<Spur, Vec<SetData>> = HashMap::new();
-        for data_set in data_sets {
-            data_set_map
-                .entry(data_set.name)
-                .or_default()
-                .push(data_set);
-        }
-
-        // Match data sets to model sets
-        let mut matched_sets = Vec::new();
-        for set in sets {
-            let mut data = data_set_map.remove(&set.name).unwrap_or_default();
-
-            // If dimen > 1, regroup flat values into tuples
-            if let Some(dimen) = set.dimen
-                && dimen > 1
-            {
-                for set_data in &mut data {
-                    set_data.values = regroup_set_values(&set_data.values, dimen as usize)?;
-                }
-            }
-
-            matched_sets.push(SetWithData { decl: *set, data });
-        }
-
-        // Check for orphaned data sets
-        if let Some((name, _)) = data_set_map.into_iter().next() {
-            bail!(
-                "Data set '{}' has no matching model declaration",
-                intern_resolve(name)
-            );
-        }
-
-        let mut param_map: HashMap<Spur, Param> = HashMap::new();
-        for param in params {
-            param_map.insert(param.name, param);
-        }
-
-        // Match data params to model params
-        let mut matched_params = Vec::new();
-        for data_param in data_params {
-            if let Some(param_decl) = param_map.remove(&data_param.name) {
-                let data_param = resolve_tabbing(data_param, &param_decl)?;
-                matched_params.push(ParamWithData {
-                    decl: param_decl,
-                    data: Some(data_param),
-                });
-            } else {
-                bail!(
-                    "Data param '{}' has no matching model declaration",
-                    intern_resolve(data_param.name)
-                );
-            }
-        }
-
-        // Add remaining params without data
-        for (_, param_decl) in param_map {
-            matched_params.push(ParamWithData {
-                decl: param_decl,
-                data: None,
-            });
-        }
-
-        let objective = objective.expect("no objective function!");
-        let sense = objective.sense;
-
-        let all_constraints = prep_constraints(objective, constraints)?;
-
-        Ok(ModelWithData {
-            sense,
-            sets: matched_sets,
-            pars: matched_params,
+        let objective = objective.context("no objective function")?;
+        Ok(Model {
+            sense: objective.sense,
+            sets,
+            params,
             vars,
             checks,
-            constraints: all_constraints,
+            constraints: prep_constraints(objective, constraints)?,
+            data,
         })
+    }
+
+    /// Compile against `source`; data in the model file fills anything it doesn't provide.
+    pub fn compile(&self, source: impl DataSource, opts: &GenOptions) -> Result<Compiled> {
+        gen_matrix(self, source, opts)
     }
 }
 
@@ -209,121 +133,4 @@ fn prep_constraints(
         rhs: Expr::Number(0.0),
     });
     Ok(all)
-}
-
-/// Regroup flat set values into tuples based on dimension
-/// e.g., with dimen=2: [A, 1, B, 2, ...] -> [(A,1), (B,2), ...]
-fn regroup_set_values(values: &SetVals, dimen: usize) -> Result<SetVals> {
-    // If already tuples or dimen is 1, return as-is
-    if dimen <= 1 {
-        return Ok(values.clone());
-    }
-
-    // Check if values are already tuples (first value is a Tuple)
-    if let Some(SetVal::Tuple(_)) = values.first() {
-        return Ok(values.clone());
-    }
-
-    // Convert flat values to terminals and group them
-    let terminals: Vec<SetValTerminal> = values
-        .iter()
-        .map(|v| {
-            Ok(match v {
-                SetVal::Str(s) => SetValTerminal::Str(*s),
-                SetVal::Int(i) => SetValTerminal::Int(*i),
-                SetVal::Tuple(_) => bail!("unexpected tuple in flat values"),
-            })
-        })
-        .collect::<Result<Vec<SetValTerminal>>>()?;
-
-    let tuples: Vec<SetVal> = terminals
-        .chunks(dimen)
-        .map(|chunk| SetVal::Tuple(SmallVec::from_slice(chunk)))
-        .collect();
-
-    Ok(SetVals(tuples))
-}
-
-/// Convert a `ParamDataBody::Tabbing` body into `Plain` using the matched
-/// param's domain arity. Non-tabbing bodies pass through untouched.
-fn resolve_tabbing(mut data: ParamData, decl: &Param) -> Result<ParamData> {
-    let Some(body) = data.body.take() else {
-        return Ok(data);
-    };
-    let tb = match body {
-        ParamDataBody::Tabbing(tb) => tb,
-        other => {
-            data.body = Some(other);
-            return Ok(data);
-        }
-    };
-
-    let parts = decl
-        .domain
-        .as_ref()
-        .map(|d| d.parts.as_slice())
-        .unwrap_or(&[]);
-
-    // Tuple-var domain parts (e.g. `(t, y) in TECH_YEAR`) would make the true
-    // tuple arity > parts.len(), breaking our row chunking. Bail instead of
-    // silently producing wrong data.
-    for part in parts {
-        if matches!(part.var, DomainPartVar::Tuple(_)) {
-            bail!(
-                "tabbing data for param '{}' with tuple-var domain \
-                 (e.g. `(x,y) in SET`) is not supported",
-                intern_resolve(data.name)
-            );
-        }
-    }
-
-    let n = parts.len();
-    let stride = n + tb.num_cols;
-    if stride == 0 || tb.values.len() % stride != 0 {
-        bail!(
-            "tabbing row length mismatch for param '{}': n+k={} does not divide {} values",
-            intern_resolve(data.name),
-            stride,
-            tb.values.len()
-        );
-    }
-
-    let plain: Vec<ParamDataPlain> = tb
-        .values
-        .chunks(stride)
-        .map(|chunk| {
-            let target: Vec<ParamDataTarget> = chunk[..n]
-                .iter()
-                .map(|v| {
-                    Ok(ParamDataTarget::IndexVar(param_val_to_set_val(
-                        *v, data.name,
-                    )?))
-                })
-                .collect::<Result<_>>()?;
-            Ok(ParamDataPlain {
-                target: Some(target),
-                value: ParamDataPlainValue::Scalar(chunk[n + tb.column]),
-            })
-        })
-        .collect::<Result<_>>()?;
-
-    data.body = Some(ParamDataBody::Plain(plain));
-    Ok(data)
-}
-
-fn param_val_to_set_val(v: ParamVal, param_name: lasso::Spur) -> Result<SetVal> {
-    match v {
-        ParamVal::Str(s) => Ok(SetVal::Str(s)),
-        ParamVal::Num(n) => {
-            if n.fract() == 0.0 && n >= 0.0 && n <= u32::MAX as f64 {
-                Ok(SetVal::Int(n as u32))
-            } else {
-                bail!(
-                    "tabbing tuple value for param '{}' is not a valid set index (got {})",
-                    intern_resolve(param_name),
-                    n
-                )
-            }
-        }
-    }
 }

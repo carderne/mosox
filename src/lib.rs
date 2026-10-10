@@ -2,6 +2,7 @@
 //!
 //! `mosox` is a GMPL parser and matrix generator.
 
+mod data;
 mod gmpl;
 mod highs;
 mod ir;
@@ -12,59 +13,39 @@ pub mod normalize;
 use std::path::Path;
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
-use crate::gmpl::loader;
+pub use crate::data::{DatSource, DataSource, TableSource};
 pub use crate::highs::format::Format;
 use crate::highs::highs_solve;
 use crate::highs::output::write_solution;
-use crate::ir::Entry;
-use crate::ir::model::ModelWithData;
-pub use crate::matrix::GenOptions;
-use crate::matrix::{Compiled, gen_matrix};
-use crate::mps::output::{print_mps, write_mps_to_file};
+pub use crate::ir::model::Model;
+pub use crate::matrix::{Compiled, GenOptions};
+use crate::mps::output::{print_mps, write_mps, write_mps_to_file};
 
-/// Loads the GMPL model file at `path` into an internal representation
-pub fn load_model(path: &str) -> Result<Vec<Entry>> {
-    let text =
-        std::fs::read_to_string(path).with_context(|| format!("Cannot read file: {path}"))?;
-    loader::parse(&text)
-}
-
-/// Loads the GMPL data file at `path` into an internal representation
-pub fn load_data(path: &str) -> Result<Vec<Entry>> {
-    let text = std::fs::read_to_string(path).expect("cannot read file");
-
-    // The grammar expects (at least one) `data;` statement to separate model from data
-    // But GMPL allows it to be omitted from a .dat file, so insert it to be safe
-    let prefixed = format!("data;\n{text}");
-    loader::parse(&prefixed)
-}
-
-/// Load model and data, calling `load_model` and `load_data`.
-pub fn load_model_and_data(path: &str, data_path: Option<&str>) -> Result<Vec<Entry>> {
+/// Load a model file and optional `.dat` file.
+pub fn load_model_and_data(path: &str, data_path: Option<&str>) -> Result<(Model, DatSource)> {
     eprintln!("Loading model from {path}");
-    let model_entries = load_model(path)?;
-    let data_entries = match data_path {
+    let model = Model::from_file(path)?;
+    let data = match data_path {
         Some(data_path) => {
             eprintln!("Loading data from {data_path}");
-            load_data(data_path)?
+            DatSource::from_file(data_path)?
         }
-        None => vec![],
+        None => DatSource::default(),
     };
-    Ok(model_entries.into_iter().chain(data_entries).collect())
+    Ok((model, data))
 }
 
-/// Merge raw model and data into a `ModelWithData`.
-pub fn merge_model(entries: Vec<Entry>) -> Result<ModelWithData> {
-    ModelWithData::from_entries(entries)
-}
-
-/// Convert merged model to matrix.
-pub fn generate_matrix(model: ModelWithData, opts: &GenOptions) -> Result<Compiled> {
+/// Compile the model against `data`, logging progress.
+pub fn generate_matrix(
+    model: &Model,
+    data: impl DataSource,
+    opts: &GenOptions,
+) -> Result<Compiled> {
     eprintln!("Generating matrix");
     let t0 = Instant::now();
-    let compiled = gen_matrix(model, opts)?;
+    let compiled = model.compile(data, opts)?;
     eprintln!("Matrix compiled in {:?}", t0.elapsed());
 
     let num_rows = compiled.cons.len();
@@ -75,15 +56,22 @@ pub fn generate_matrix(model: ModelWithData, opts: &GenOptions) -> Result<Compil
     Ok(compiled)
 }
 
+/// Matrix in MPS format.
+pub fn matrix_to_mps_string(compiled: &Compiled, model_name: &str) -> String {
+    let mut buf = Vec::new();
+    write_mps(compiled, model_name, &mut buf);
+    String::from_utf8(buf).expect("MPS output is UTF-8")
+}
+
 /// Print matrix in MPS format to stdout.
-pub fn matrix_to_mps(compiled: Compiled, model_name: &str) {
+pub fn matrix_to_mps(compiled: &Compiled, model_name: &str) {
     eprintln!("Outputting MPS to stdout");
     print_mps(compiled, model_name);
 }
 
 /// Write matrix in MPS format to a file.
 pub fn matrix_to_mps_file(
-    compiled: Compiled,
+    compiled: &Compiled,
     model_name: &str,
     path: &std::path::Path,
 ) -> Result<()> {

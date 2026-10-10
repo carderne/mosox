@@ -15,8 +15,8 @@ use lasso::Spur;
 
 use crate::{
     ir::{
-        self, DomainPartVar, Index, SetData, SetExpr, SetOf, SetRef, SetVal, SetValTerminal,
-        SetVals, SetValue, model::SetWithData,
+        self, DomainPartVar, Index, SetExpr, SetOf, SetRef, SetVal, SetValTerminal, SetVals,
+        SetValue,
     },
     matrix::{
         constraint::{IdxValMap, domain_to_indexes, get_index_map},
@@ -27,25 +27,6 @@ use crate::{
 pub struct SetCont {
     pub decl: ir::Set,
     pub data: HashMap<Index, SetVals>,
-}
-
-impl From<SetWithData> for SetCont {
-    fn from(inner: SetWithData) -> Self {
-        let SetWithData { decl, data } = inner;
-
-        let data = data
-            .into_iter()
-            .map(
-                |SetData {
-                     name: _,
-                     index,
-                     values,
-                 }| (index, values),
-            )
-            .collect();
-
-        SetCont { decl, data }
-    }
 }
 
 impl SetCont {
@@ -412,27 +393,27 @@ mod tests {
     use super::*;
     use crate::ir::{
         Domain, DomainPart, DomainPartVar, SetAtom, SetExpr, SetOf, SetVal, SetValTerminal,
-        interner::intern, model::SetWithData,
+        interner::intern,
     };
     use indexmap::IndexMap;
     use smallvec::smallvec;
     use std::collections::HashMap;
 
     /// Build a minimal `Lookups` containing only the given named sets.
-    fn lookups_with_sets(sets: Vec<SetWithData>) -> Lookups {
+    fn lookups_with_sets(sets: Vec<SetCont>) -> Lookups {
         Lookups {
             set_map: sets
                 .into_iter()
-                .map(|s| (s.decl.name, SetCont::from(s)))
+                .map(|s| (s.decl.name, s))
                 .collect::<IndexMap<_, _>>(),
             var_map: HashMap::new(),
             par_map: HashMap::new(),
         }
     }
 
-    /// Helper: create a `SetWithData` with no domain and literal values.
-    fn simple_set(name: &str, vals: Vec<SetVal>) -> SetWithData {
-        SetWithData {
+    /// Helper: create a set with no domain and literal values.
+    fn simple_set(name: &str, vals: Vec<SetVal>) -> SetCont {
+        SetCont {
             decl: ir::Set {
                 name: intern(name),
                 line_no: 0,
@@ -443,11 +424,7 @@ mod tests {
                 inline_data: None,
                 default: None,
             },
-            data: vec![ir::SetData {
-                name: intern(name),
-                index: smallvec![],
-                values: vals.into(),
-            }],
+            data: HashMap::from([(smallvec![], vals.into())]),
         }
     }
 

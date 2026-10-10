@@ -24,7 +24,7 @@ args = ["test"]
 [tasks.testlarge]
 env = { MOSOX_TEST_LARGE = "1" }
 command = "cargo"
-args = ["test", "--release", "--test", "regression_test"]
+args = ["test", "--release", "--lib", "--test", "regression_test"]
 
 [tasks.bench]
 command = "cargo"
@@ -72,3 +72,4 @@ args = [".", "--source-dir=.", "--binary-path=target/debug", "--output-types=htm
 dependencies = ["gen-cov"]
 command = "open"
 args = ["target/coverage/index.html"]
+

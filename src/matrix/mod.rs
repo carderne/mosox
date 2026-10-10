@@ -9,10 +9,11 @@ use std::sync::Arc;
 use anyhow::Result;
 use indexmap::IndexMap;
 use lasso::Spur;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use smallvec::SmallVec;
 
-use crate::ir::model::{ConstraintOrObjective, ModelWithData};
+use crate::data::{DataSource, Layered};
+use crate::ir::model::{ConstraintOrObjective, Model};
 use crate::ir::op::{Bounds, RowType};
 use crate::ir::{Index, ObjSense, VarType};
 use crate::matrix::constraint::{Pair, algebra, domain_to_indexes, get_index_map, recurse};
@@ -49,22 +50,14 @@ pub struct GenOptions {
     pub check: bool,
 }
 
-pub fn gen_matrix(model: ModelWithData, opts: &GenOptions) -> Result<Compiled> {
-    let ModelWithData {
-        sense,
-        sets,
-        pars,
-        vars,
-        checks,
-        constraints,
-    } = model;
-    let mut lookups = Lookups::from_model(sets, vars, pars)?;
+pub fn gen_matrix(model: &Model, source: impl DataSource, opts: &GenOptions) -> Result<Compiled> {
+    let mut lookups = Lookups::new(model, Layered(source, model.data.clone()))?;
     materialize_sets(&mut lookups);
     if opts.check {
-        validate(&checks, &lookups)?;
+        validate(&model.checks, &lookups)?;
     }
-    let cons = build_constraints(constraints, &lookups)?;
-    let mut compiled = build_cols_and_rows(sense, cons, &lookups)?;
+    let cons = build_constraints(&model.constraints, &lookups)?;
+    let mut compiled = build_cols_and_rows(model.sense, cons, &lookups)?;
     if opts.prune {
         prune_zeros(&mut compiled.vars);
     }
@@ -131,11 +124,11 @@ struct SolvedConstraint {
 }
 
 fn build_constraints(
-    constraints: Vec<ConstraintOrObjective>,
+    constraints: &[ConstraintOrObjective],
     lookups: &Lookups,
 ) -> Result<Vec<SolvedConstraint>> {
     Ok(constraints
-        .into_par_iter()
+        .par_iter()
         .map(
             |ConstraintOrObjective {
                  name,
@@ -146,22 +139,25 @@ fn build_constraints(
              }|
              -> Result<Vec<SolvedConstraint>> {
                 let (indexes, parts) = match domain {
-                    Some(d) => (domain_to_indexes(&d, lookups, &SmallVec::new())?, d.parts),
-                    None => (vec![vec![].into()], vec![]),
+                    Some(d) => (
+                        domain_to_indexes(d, lookups, &SmallVec::new())?,
+                        d.parts.as_slice(),
+                    ),
+                    None => (vec![vec![].into()], &[][..]),
                 };
 
                 indexes
                     .into_par_iter()
                     .map(|con_index| -> Result<SolvedConstraint> {
                         let con_index = Arc::new(con_index);
-                        let idx_val_map = get_index_map(&parts, &con_index)?;
-                        let lhs = recurse(&lhs, lookups, &idx_val_map)?;
-                        let rhs = recurse(&rhs, lookups, &idx_val_map)?;
+                        let idx_val_map = get_index_map(parts, &con_index)?;
+                        let lhs = recurse(lhs, lookups, &idx_val_map)?;
+                        let rhs = recurse(rhs, lookups, &idx_val_map)?;
                         let (pairs, rhs_total) = algebra(lhs, rhs);
                         Ok(SolvedConstraint {
-                            name,
+                            name: *name,
                             idx: con_index,
-                            row_type,
+                            row_type: *row_type,
                             rhs: rhs_total,
                             pairs,
                         })

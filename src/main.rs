@@ -11,8 +11,8 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 
 use mosox::{
-    Format, GenOptions, generate_matrix, load_model_and_data, matrix_to_mps_file, merge_model,
-    solve_matrix, stem,
+    Format, GenOptions, generate_matrix, load_model_and_data, matrix_to_mps_file, solve_matrix,
+    stem,
 };
 
 #[derive(Parser)]
@@ -92,12 +92,11 @@ fn run() -> anyhow::Result<()> {
             output,
             gen_args,
         } => {
-            let entries = load_model_and_data(path, data_path.as_deref())?;
-            let model = merge_model(entries)?;
-            let compiled = generate_matrix(model, &gen_args.options())
+            let (model, data) = load_model_and_data(path, data_path.as_deref())?;
+            let compiled = generate_matrix(&model, data, &gen_args.options())
                 .with_context(|| format!("in model {path}"))?;
             if let Some(output) = output {
-                matrix_to_mps_file(compiled, stem(path), std::path::Path::new(output))?;
+                matrix_to_mps_file(&compiled, stem(path), std::path::Path::new(output))?;
             }
             Ok(())
         }
@@ -121,9 +120,8 @@ fn run() -> anyhow::Result<()> {
                 })
                 .filter(|(k, _)| !k.is_empty())
                 .collect();
-            let entries = load_model_and_data(path, data_path.as_deref())?;
-            let model = merge_model(entries)?;
-            let compiled = generate_matrix(model, &gen_args.options())
+            let (model, data) = load_model_and_data(path, data_path.as_deref())?;
+            let compiled = generate_matrix(&model, data, &gen_args.options())
                 .with_context(|| format!("in model {path}"))?;
             solve_matrix(
                 compiled,

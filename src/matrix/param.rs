@@ -1,12 +1,7 @@
 use std::collections::HashMap;
 
-use anyhow::{Result, bail};
-
-use crate::ir::model::ParamWithData;
-use crate::ir::{
-    self, Expr, Index, ParamAssign, ParamDataBody, ParamDataPlainValue, ParamDataTarget, ParamVal,
-    SetVal,
-};
+use crate::data::ParamValues;
+use crate::ir::{self, Expr, Index, ParamAssign, ParamVal};
 
 #[derive(Debug, Clone)]
 pub struct Param {
@@ -22,100 +17,24 @@ pub enum ParamValEnum {
     None,
 }
 
-pub fn create_param(param: ParamWithData) -> Result<Param> {
-    let default = resolve_param_default(&param)?;
-    let ParamWithData { mut decl, data } = param;
-    let data = if let Some(body) = data.and_then(|d| d.body) {
-        body_to_data(body)?
-    } else if let Some(ParamAssign::Expr(expr)) = decl.assign.take() {
-        ParamValEnum::Expr(expr)
-    } else {
-        ParamValEnum::None
+pub fn create_param(mut decl: ir::Param, provided: Option<ParamValues>) -> Param {
+    let (values, data_default) = provided.map_or_else(Default::default, |p| (p.values, p.default));
+    let assign = decl.assign.take();
+    let data = match assign {
+        _ if !values.is_empty() => ParamValEnum::Arr(values),
+        Some(ParamAssign::Expr(expr)) => ParamValEnum::Expr(expr),
+        _ => ParamValEnum::None,
     };
-    // Inline data has already been moved into `data`
-    decl.assign = None;
-    Ok(Param {
+    // A default given with the data overrides the model's
+    let default = data_default
+        .map(|val| match val {
+            ParamVal::Num(n) => Expr::Number(n),
+            ParamVal::Str(s) => Expr::Str(s),
+        })
+        .or_else(|| decl.default.clone());
+    Param {
         decl,
         data,
         default,
-    })
-}
-
-fn body_to_data(body: ParamDataBody) -> Result<ParamValEnum> {
-    let mut arr: HashMap<Index, ParamVal> = HashMap::new();
-    match body {
-        ParamDataBody::Plain(plain_entries) => {
-            if plain_entries.is_empty() {
-                return Ok(ParamValEnum::None);
-            }
-            for entry in plain_entries {
-                let target_idxs = param_target_to_index(entry.target);
-                match entry.value {
-                    ParamDataPlainValue::Scalar(val) => {
-                        arr.insert(target_idxs.into(), val);
-                    }
-                    ParamDataPlainValue::Pairs(pairs) => {
-                        for pair in pairs {
-                            arr.insert(
-                                [target_idxs.clone(), vec![pair.key]].concat().into(),
-                                pair.value,
-                            );
-                        }
-                    }
-                }
-            }
-        }
-        ParamDataBody::Tabbing(_) => {
-            // Tabbing is resolved to Plain during model merge; reaching
-            // here means resolve_tabbing was skipped.
-            bail!("internal: unresolved tabbing body reached matrix resolution")
-        }
-        ParamDataBody::Tabular(tables) => {
-            for table in tables {
-                let target_idxs = param_target_to_index(table.target);
-                for row in table.rows {
-                    for (col, value) in table.cols.iter().zip(row.values.iter()) {
-                        arr.insert(
-                            [target_idxs.clone(), vec![row.label.clone(), col.clone()]]
-                                .concat()
-                                .into(),
-                            *value,
-                        );
-                    }
-                }
-            }
-        }
     }
-    Ok(ParamValEnum::Arr(arr))
-}
-
-fn param_target_to_index(target: Option<Vec<ParamDataTarget>>) -> Vec<SetVal> {
-    // Expressions like:
-    // [Atlantis_00A,NGCC,NOx,*,*]:
-    // Become prefixes for the indexes down below
-    match target {
-        Some(targets) => targets
-            .into_iter()
-            .filter_map(|t| match t {
-                ParamDataTarget::IndexVar(idx) => Some(idx),
-                ParamDataTarget::Any => None,
-            })
-            .collect(),
-        None => vec![],
-    }
-}
-
-fn resolve_param_default(param: &ParamWithData) -> Result<Option<Expr>> {
-    if let Some(data) = &param.data {
-        if let Some(default) = data.default {
-            match default {
-                ParamVal::Num(num) => return Ok(Some(Expr::Number(num))),
-                ParamVal::Str(_) => bail!("no support for symbolic default param value"),
-            }
-        };
-    } else if let Some(default) = &param.decl.default {
-        return Ok(Some(default.clone()));
-    };
-
-    Ok(None)
 }
