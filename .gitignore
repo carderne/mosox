@@ -1,7 +1,14 @@
 .claude
 /target
+
+/notes
+
 /examples/osemosys_large/**
 /examples/clews/**
+/examples/muio
+/examples/ceron
+/examples/ved
+/examples/muio_features
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
