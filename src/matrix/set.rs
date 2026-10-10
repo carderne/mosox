@@ -1,4 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
+
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::{
     ir::{
@@ -90,8 +93,14 @@ pub fn resolve_set_expr(
             let lhs = resolve_set_expr(lhs, idx_val_map, lookups)?.0;
             let rhs = resolve_set_expr(rhs, idx_val_map, lookups)?.0;
             match op {
-                SetInfixOp::Inter => Ok(intersect(lhs, rhs).into()),
+                SetInfixOp::Inter => Ok(intersect(lhs, &rhs).into()),
                 SetInfixOp::Union => Ok(union(lhs, rhs).into()),
+                SetInfixOp::Diff => Ok(difference(lhs, &rhs).into()),
+                SetInfixOp::SymDiff => {
+                    let mut out = difference(lhs.clone(), &rhs);
+                    out.extend(difference(rhs, &lhs));
+                    Ok(out.into())
+                }
             }
         }
     }
@@ -103,6 +112,7 @@ fn resolve_set_atom(expr: &SetAtom, idx_val_map: &IdxValMap, lookups: &Lookups) 
         // This is using a Set domain expression to actually build the values for the set,
         // rather than "get" them from one or more sets
         SetAtom::Domain(domain) => resolve_set_from_domain(domain, idx_val_map, lookups),
+        SetAtom::Literal(vals) => Ok(vals.clone()),
         SetAtom::SetOf(set_of) => resolve_set_of(set_of, idx_val_map, lookups),
         SetAtom::Ref(SetRef { spur, subscript }) => {
             let index = concrete_index(subscript, idx_val_map, lookups)?;
@@ -161,7 +171,7 @@ fn resolve_set_from_domain(
 /// - **Single integrand** (`setof{i in S} i`): produces a set of 1-tuples (scalar values).
 /// - **Tuple integrand** (`setof{i in S} (i, f[i])`): produces a set of m-tuples.
 fn resolve_set_of(set_of: &SetOf, idx_val_map: &IdxValMap, lookups: &Lookups) -> Result<SetVals> {
-    Ok(domain_to_indexes(&set_of.domain, lookups, idx_val_map)?
+    let vals = domain_to_indexes(&set_of.domain, lookups, idx_val_map)?
         .into_iter()
         .map(|idx| {
             let local_map: IdxValMap = set_of
@@ -206,8 +216,9 @@ fn resolve_set_of(set_of: &SetOf, idx_val_map: &IdxValMap, lookups: &Lookups) ->
                 }
             })
         })
-        .collect::<Result<Vec<_>>>()?
-        .into())
+        .collect::<Result<Vec<_>>>()?;
+    // Distinct dummy combinations can map to the same element
+    Ok(dedup(vals).into())
 }
 
 /// Resolve a `DomainPartRange` (e.g. `1..NbYears` or `1..NbSeasons[y]`) to the sequence of
@@ -246,15 +257,90 @@ fn resolve_range_end(end: &SetArithEnd, idx_val_map: &IdxValMap, lookups: &Looku
     }
 }
 
-fn intersect<T: Eq + std::hash::Hash + Clone>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
-    let set: HashSet<T> = b.into_iter().collect();
-    a.into_iter().filter(|x| set.contains(x)).collect()
+// Set operations preserve element order, so output is deterministic
+
+fn intersect<T: Eq + Hash>(a: Vec<T>, b: &[T]) -> Vec<T> {
+    let b: HashSet<&T> = b.iter().collect();
+    a.into_iter().filter(|x| b.contains(x)).collect()
 }
 
-fn union<T: Eq + std::hash::Hash>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
-    let mut set: HashSet<T> = a.into_iter().collect();
-    set.extend(b);
-    set.into_iter().collect()
+fn difference<T: Eq + Hash>(a: Vec<T>, b: &[T]) -> Vec<T> {
+    let b: HashSet<&T> = b.iter().collect();
+    a.into_iter().filter(|x| !b.contains(x)).collect()
+}
+
+fn union<T: Eq + Hash>(mut a: Vec<T>, b: Vec<T>) -> Vec<T> {
+    let extra = difference(b, &a);
+    a.extend(extra);
+    a
+}
+
+fn dedup<T: Eq + Hash + Clone>(a: Vec<T>) -> Vec<T> {
+    let mut seen = HashSet::new();
+    a.into_iter().filter(|x| seen.insert(x.clone())).collect()
+}
+
+/// Whether `elem` is in the set, without cloning stored set data.
+pub fn set_contains(
+    expr: &SetExpr,
+    elem: &SetVal,
+    idx_val_map: &IdxValMap,
+    lookups: &Lookups,
+) -> Result<bool> {
+    if let SetExpr::Atom(SetAtom::Ref(SetRef { spur, subscript })) = expr {
+        let index = concrete_index(subscript, idx_val_map, lookups)?;
+        let set = lookups
+            .set_map
+            .get(spur)
+            .with_context(|| format!("set '{}' not found", intern_resolve(*spur)))?;
+        if let Some(vals) = set.data.get(&index) {
+            return Ok(vals.contains(elem));
+        }
+    }
+    Ok(resolve_set_expr(expr, idx_val_map, lookups)?.contains(elem))
+}
+
+/// Evaluate computed sets (`:=` or `default`) once, in declaration order, and store
+/// the result as data so later references don't re-evaluate them.
+/// A set that fails to evaluate is left lazy, so the error only surfaces if it's used.
+pub fn materialize_sets(lookups: &mut Lookups) {
+    for i in 0..lookups.set_map.len() {
+        let set = &lookups.set_map[i];
+        if set.decl.expr.is_none() && set.decl.default.is_none() {
+            continue;
+        }
+        if let Ok(data) = set.materialize(lookups) {
+            lookups.set_map[i].data.extend(data);
+        }
+    }
+}
+
+impl SetCont {
+    fn materialize(&self, lookups: &Lookups) -> Result<Vec<(Index, SetVals)>> {
+        let domain = &self.decl.domain;
+        let indexes = match domain.parts.is_empty() {
+            true => vec![Index::new()],
+            false => domain_to_indexes(domain, lookups, &IdxValMap::new())?,
+        };
+        indexes
+            .into_par_iter()
+            // Data is keyed by flat index, as produced by `concrete_index`
+            .map(|index| (flat_index(&index), index))
+            .filter(|(flat, _)| !self.data.contains_key(flat))
+            .map(|(flat, index)| Ok((flat, self.resolve(&index, lookups)?)))
+            .collect()
+    }
+}
+
+fn flat_index(index: &Index) -> Index {
+    let mut flat = Index::new();
+    for val in index {
+        match val {
+            SetVal::Tuple(t) => flat.extend(t.iter().map(SetVal::from)),
+            val => flat.push(val.clone()),
+        }
+    }
+    flat
 }
 
 // Helper function to get a value from IdxValMap

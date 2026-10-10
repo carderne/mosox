@@ -28,15 +28,20 @@ static PRATT_PARSER: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
 
 static LOGIC_PRATT: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
     PrattParser::new()
-        // Precedence: and > or (standard convention)
+        // Precedence lowest to highest (per GMPL spec)
         .op(Op::infix(Rule::bool_or, Left))
+        .op(Op::prefix(Rule::logic_exists) | Op::prefix(Rule::logic_forall))
         .op(Op::infix(Rule::bool_and, Left))
+        .op(Op::prefix(Rule::logic_not))
 });
 
 static SET_PRATT: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
     PrattParser::new()
-        // inter and union at the same precedence level (no ordering defined)
-        .op(Op::infix(Rule::set_infix_op, Left))
+        // Precedence lowest to highest (per GMPL spec)
+        .op(Op::infix(Rule::set_union, Left)
+            | Op::infix(Rule::set_diff, Left)
+            | Op::infix(Rule::set_symdiff, Left))
+        .op(Op::infix(Rule::set_inter, Left))
 });
 
 // ==============================
@@ -279,6 +284,7 @@ fn parse_set_expr(pairs: Pairs<Rule>) -> Result<SetExpr> {
                 let inner = primary.into_inner().next().context("empty set_atom")?;
                 Ok(SetExpr::Atom(match inner.as_rule() {
                     Rule::domain => SetAtom::Domain(Domain::from_entry(inner)?),
+                    Rule::set_literal => SetAtom::Literal(parse_set_literal(inner)?),
                     Rule::set_setof => SetAtom::SetOf(SetOf::from_entry(inner)?),
                     Rule::set_arith => SetAtom::Arith(SetArith::from_entry(inner)?),
                     Rule::set_ref => SetAtom::Ref(SetRef::from_entry(inner)?),
@@ -289,10 +295,12 @@ fn parse_set_expr(pairs: Pairs<Rule>) -> Result<SetExpr> {
             rule => bail!("Expected set_atom primary, found {:?}", rule),
         })
         .map_infix(|lhs, op, rhs| {
-            let op = match op.as_str() {
-                "inter" => SetInfixOp::Inter,
-                "union" => SetInfixOp::Union,
-                s => bail!("Unexpected set_infix_op: {}", s),
+            let op = match op.as_rule() {
+                Rule::set_inter => SetInfixOp::Inter,
+                Rule::set_union => SetInfixOp::Union,
+                Rule::set_diff => SetInfixOp::Diff,
+                Rule::set_symdiff => SetInfixOp::SymDiff,
+                rule => bail!("Unexpected set infix op: {:?}", rule),
             };
             Ok(SetExpr::InfixOp {
                 lhs: Box::new(lhs?),
@@ -303,20 +311,48 @@ fn parse_set_expr(pairs: Pairs<Rule>) -> Result<SetExpr> {
         .parse(pairs)
 }
 
+fn parse_set_literal(entry: Pair<Rule>) -> Result<SetVals> {
+    let terminal = |p: Pair<Rule>| -> Result<SetValTerminal> {
+        Ok(match p.as_rule() {
+            Rule::int => SetValTerminal::Int(p.as_str().parse()?),
+            _ => SetValTerminal::Str(parse_string_literal(p.as_str())),
+        })
+    };
+    entry
+        .into_inner()
+        .map(|p| match p.as_rule() {
+            Rule::set_literal_tuple => Ok(SetVal::Tuple(
+                p.into_inner().map(terminal).collect::<Result<_>>()?,
+            )),
+            _ => Ok(SetVal::from(&terminal(p)?)),
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(SetVals)
+}
+
+/// Strip the quotes from a string literal and unescape doubled quotes.
+fn parse_string_literal(s: &str) -> Spur {
+    let quote = &s[..1];
+    intern(&s[1..s.len() - 1].replace(&quote.repeat(2), quote))
+}
+
 /// A leaf node in a set expression
 #[derive(Clone, Debug)]
 pub enum SetAtom {
     Domain(Domain),
+    Literal(SetVals),
     SetOf(SetOf),
     Arith(SetArith),
     Ref(SetRef),
 }
 
-/// Inter or union operator
+/// Binary set operator
 #[derive(Clone, Copy, Debug)]
 pub enum SetInfixOp {
     Inter,
     Union,
+    Diff,
+    SymDiff,
 }
 
 #[derive(Clone, Debug)]
@@ -1031,6 +1067,7 @@ pub enum Entry {
 #[derive(Clone, Debug)]
 pub enum Expr {
     Number(f64),
+    Str(Spur),
     VarSubscripted(VarSubscripted),
     FuncSum(Box<FuncSum>),
     FuncMin(Box<FuncMin>),
@@ -1056,6 +1093,7 @@ pub fn parse_expr(pairs: Pairs<Rule>) -> Result<Expr> {
     PRATT_PARSER
         .map_primary(|primary| match primary.as_rule() {
             Rule::number => Ok(Expr::Number(primary.as_str().parse().unwrap_or(0.0))),
+            Rule::string_literal => Ok(Expr::Str(parse_string_literal(primary.as_str()))),
             Rule::var_subscripted => Ok(Expr::VarSubscripted(VarSubscripted::from_entry(primary)?)),
             Rule::func_min => Ok(Expr::FuncMin(Box::new(FuncMin::from_entry(primary)?))),
             Rule::func_max => Ok(Expr::FuncMax(Box::new(FuncMax::from_entry(primary)?))),
@@ -1115,7 +1153,8 @@ pub enum LogicExpr {
         rhs: Expr,
     },
     Membership {
-        lhs: SetVals,
+        /// One expression per tuple component
+        lhs: Vec<Expr>,
         op: MemberOp,
         rhs: Box<SetExpr>,
     },
@@ -1128,6 +1167,12 @@ pub enum LogicExpr {
         lhs: Box<LogicExpr>,
         op: BoolOp,
         rhs: Box<LogicExpr>,
+    },
+    Not(Box<LogicExpr>),
+    Iterated {
+        op: IterOp,
+        domain: Box<Domain>,
+        operand: Box<LogicExpr>,
     },
 }
 
@@ -1150,8 +1195,12 @@ fn parse_logic_expr(pairs: Pairs<Rule>) -> Result<LogicExpr> {
             }
             Rule::logic_member => {
                 let mut inner = primary.into_inner();
-                let lhs =
-                    parse_set_vals_or_tuples(inner.next().context("missing logic member lhs")?)?;
+                let lhs = inner
+                    .next()
+                    .context("missing logic member lhs")?
+                    .into_inner()
+                    .map(Expr::from_entry)
+                    .collect::<Result<_>>()?;
                 let op = MemberOp::from_entry(inner.next().context("missing logic member op")?)?;
                 let rhs = Box::new(SetExpr::from_entry(
                     inner.next().context("missing logic member rhs")?,
@@ -1178,6 +1227,22 @@ fn parse_logic_expr(pairs: Pairs<Rule>) -> Result<LogicExpr> {
             }
             Rule::logic_expr => parse_logic_expr(primary.into_inner()),
             rule => bail!("Expected logic primary, found {:?}", rule),
+        })
+        .map_prefix(|op, operand| {
+            let operand = Box::new(operand?);
+            Ok(match op.as_rule() {
+                Rule::logic_not => LogicExpr::Not(operand),
+                rule => LogicExpr::Iterated {
+                    op: match rule {
+                        Rule::logic_exists => IterOp::Exists,
+                        _ => IterOp::Forall,
+                    },
+                    domain: Box::new(Domain::from_entry(
+                        op.into_inner().next().context("missing domain")?,
+                    )?),
+                    operand,
+                },
+            })
         })
         .map_infix(|lhs, op, rhs| {
             let lhs = lhs?;
@@ -1478,6 +1543,13 @@ impl MemberOp {
     }
 }
 
+/// Iterated logical operator
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum IterOp {
+    Exists,
+    Forall,
+}
+
 /// Subset operator (set within set)
 #[derive(Clone, Copy, Debug)]
 pub enum SubsetOp {
@@ -1701,9 +1773,9 @@ impl SubscriptPart {
                 }
                 Rule::int => var = Some(SubscriptPartVar::ValInt(pair.as_str().parse().unwrap())),
                 Rule::string_literal => {
-                    let s = pair.as_str();
-                    let s = &s[1..s.len() - 1]; // strip quotes
-                    var = Some(SubscriptPartVar::ValStr(intern(s)));
+                    var = Some(SubscriptPartVar::ValStr(parse_string_literal(
+                        pair.as_str(),
+                    )));
                 }
                 Rule::subscript_shift => shift = Some(SubscriptShift::from_entry(pair)?),
                 _ => {}

@@ -160,12 +160,10 @@ It is intended that all of these will ultimately be supported, and most of them 
 - These arithmetic operators: `less`, `div`, `mod`
 - These symbolic operators: `&` (string concatenation)
 - These set expressions: conditional set expressions
-- These set operators: `diff`, `symdiff`.
-- These logical iterated expressions: `forall`, `exists`
-- These logical operators: `not`
+- String ordering comparisons (`<`, `>` etc. between symbolic values)
 
 ### Sets
-- `within` and `dimen` are only enforced on explicit data, not on sets computed from expressions
+- `within` and `dimen` are not enforced on computed sets that fail to evaluate at load (eg sets over tuple domains)
 
 ### Parameters
 - Type specifiers, relational conditions and superset (`in`) expressions are only enforced on explicit data and constant defaults, not on computed params (`:=` expressions) or expression defaults

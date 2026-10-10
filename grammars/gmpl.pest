@@ -59,8 +59,16 @@ set_assign      =  { ":=" ~ (set_expr | set_vals | set_tuples) }
 
 set_default     =  { "default" ~ ( set_expr | set_vals | set_tuples) }
 set_expr        =  { set_atom ~ (set_infix_op ~ set_atom)* }
-set_infix_op    =  { "inter" | "union" }
-set_atom        =  { domain | set_setof | set_arith | set_ref | ("(" ~ set_expr ~ ")") }
+set_infix_op    = _{ set_inter | set_union | set_diff | set_symdiff }
+set_inter       =  { "inter" }
+set_union       =  { "union" }
+set_diff        =  { "diff" }
+set_symdiff     =  { "symdiff" }
+// domain must come before set_literal so that {A} iterates over A
+set_atom        =  { domain | set_literal | set_setof | set_arith | set_ref | ("(" ~ set_expr ~ ")") }
+set_literal     =  { "{" ~ (set_literal_val ~ ("," ~ set_literal_val)*)? ~ "}" }
+set_literal_val = _{ set_literal_tuple | int | string_literal }
+set_literal_tuple = { "(" ~ (int | string_literal) ~ ("," ~ (int | string_literal))+ ~ ")" }
 set_ref         =  { id ~ subscript? }
 set_setof       =  { "setof" ~ domain ~ domain_var }
 set_arith       =  { set_arith_end ~ ".." ~ set_arith_end }
@@ -95,8 +103,9 @@ FOR       = { "for" ~ domain ~ "{" ~ for_inner* ~ "}" }
 for_inner = { FOR | PRINT }
 
 // Print (ignored)
-PRINT   = @{ "printf" ~ (!";" ~ ANY)* ~ ";" }
-DISPLAY = @{ "display" ~ (!";" ~ ANY)* ~ ";" }
+PRINT      = @{ "printf" ~ (raw_quoted | !";" ~ ANY)* ~ ";" }
+DISPLAY    = @{ "display" ~ (raw_quoted | !";" ~ ANY)* ~ ";" }
+raw_quoted = _{ ("\"" ~ (!"\"" ~ ANY)* ~ "\"") | ("'" ~ (!"'" ~ ANY)* ~ "'") }
 
 // Solve (ignored)
 SOLVE = { "solve" ~ ";" }
@@ -188,13 +197,18 @@ domain_var_tuple   = { "(" ~ id ~ ("," ~ id)+ ~ ")" }
 
 // Logical expression
 // Expressions that evaluate to true or false
-// Uses Pratt parser for proper operator precedence (and > or)
+// Uses Pratt parser for GMPL precedence: not > and > exists/forall > or
 // Example: Demand[r] <> 0
-logic_expr     =  { logic_primary ~ (logic_infix ~ logic_primary)* }
+logic_expr     =  { logic_prefix* ~ logic_primary ~ (logic_infix ~ logic_prefix* ~ logic_primary)* }
+logic_prefix   = _{ logic_not | logic_exists | logic_forall }
+logic_not      = @{ ("not" ~ !(ASCII_ALPHANUMERIC | "_")) | ("!" ~ !("=" | "in" | "within")) }
+logic_exists   =  { "exists" ~ domain }
+logic_forall   =  { "forall" ~ domain }
 logic_primary  = _{ logic_compare | logic_member | logic_subset | logic_compound | expr }
 logic_infix    = _{ bool_and | bool_or }
 logic_compare  =  { expr ~ rel_op ~ expr }
-logic_member   =  { set_tuple ~ member_op ~ set_expr }
+logic_member   =  { member_lhs ~ member_op ~ set_expr }
+member_lhs     =  { ("(" ~ expr ~ ("," ~ expr)+ ~ ")") | expr }
 logic_subset   =  { set_expr ~ subset_op ~ set_expr }
 logic_compound =  { "(" ~ logic_expr ~ ")" }
 
@@ -222,7 +236,7 @@ sub             =  { "-" }
 mul             =  { "*" }
 div             =  { "/" }
 pow             =  { "^" }
-primary         = _{ conditional | number | func | var_subscripted | "(" ~ expr ~ ")" }
+primary         = _{ conditional | number | string_literal | func | var_subscripted | "(" ~ expr ~ ")" }
 conditional     =  { "if" ~ logic_expr ~ "then" ~ expr ~ ("else" ~ expr)? }
 
 // Function

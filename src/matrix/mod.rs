@@ -17,6 +17,7 @@ use crate::ir::op::{Bounds, RowType};
 use crate::ir::{Index, ObjSense, VarType};
 use crate::matrix::constraint::{Pair, algebra, domain_to_indexes, get_index_map, recurse};
 use crate::matrix::lookup::Lookups;
+use crate::matrix::set::materialize_sets;
 use crate::matrix::validate::validate;
 
 pub type ConId = (Spur, Arc<Index>);
@@ -57,7 +58,8 @@ pub fn gen_matrix(model: ModelWithData, opts: &GenOptions) -> Result<Compiled> {
         checks,
         constraints,
     } = model;
-    let lookups = Lookups::from_model(sets, vars, pars)?;
+    let mut lookups = Lookups::from_model(sets, vars, pars)?;
+    materialize_sets(&mut lookups);
     if opts.check {
         validate(&checks, &lookups)?;
     }

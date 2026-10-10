@@ -3,10 +3,10 @@ use crate::ir::{
     BoolOp, Domain, DomainPart, DomainPartVar, Expr, Index, MathOp, ParamVal, RelOp, SetVal,
     SetValTerminal, Subscript,
 };
-use crate::ir::{LogicExpr, MemberOp, SetAtom, SetExpr, SubsetOp};
+use crate::ir::{IterOp, LogicExpr, MemberOp, SetAtom, SetExpr, SubsetOp};
 use crate::matrix::lookup::Lookups;
 use crate::matrix::param::{Param, ParamValEnum};
-use crate::matrix::set::{concrete_index, idx_get, resolve_set_expr};
+use crate::matrix::set::{concrete_index, idx_get, resolve_set_expr, set_contains};
 use anyhow::{Context, Result, bail};
 use lasso::Spur;
 use smallvec::SmallVec;
@@ -99,6 +99,7 @@ pub fn resolve_param_to_setval(
 pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Result<Vec<Term>> {
     match expr {
         Expr::Number(num) => Ok(vec![Term::Num(*num)]),
+        Expr::Str(s) => Ok(vec![Term::Str(*s)]),
         Expr::VarSubscripted(var_or_param) => {
             let name = &var_or_param.var;
             let index = concrete_index(&var_or_param.subscript, idx_val_map, lookups)?;
@@ -317,10 +318,11 @@ pub fn check_logic_condition(
             )
         }
         LogicExpr::Membership { lhs, op, rhs } => {
-            let rhs = resolve_set_expr(rhs, idx_val_map, lookups)?;
+            let elem = eval_member(lhs, lookups, idx_val_map)?;
+            let found = set_contains(rhs, &elem, idx_val_map, lookups)?;
             Ok(match op {
-                MemberOp::In => lhs.iter().all(|elem| rhs.contains(elem)),
-                MemberOp::NotIn => lhs.iter().all(|elem| !rhs.contains(elem)),
+                MemberOp::In => found,
+                MemberOp::NotIn => !found,
             })
         }
         LogicExpr::Subset { lhs, op, rhs } => {
@@ -332,12 +334,28 @@ pub fn check_logic_condition(
             })
         }
         LogicExpr::BoolOp { lhs, op, rhs } => {
+            // Short-circuits, so eg `i > 1 and p[i-1] > 0` is safe
             let lhs = check_logic_condition(lhs, lookups, idx_val_map)?;
-            let rhs = check_logic_condition(rhs, lookups, idx_val_map)?;
             Ok(match op {
-                BoolOp::And => lhs && rhs,
-                BoolOp::Or => lhs || rhs,
+                BoolOp::And => lhs && check_logic_condition(rhs, lookups, idx_val_map)?,
+                BoolOp::Or => lhs || check_logic_condition(rhs, lookups, idx_val_map)?,
             })
+        }
+        LogicExpr::Not(inner) => Ok(!check_logic_condition(inner, lookups, idx_val_map)?),
+        LogicExpr::Iterated {
+            op,
+            domain,
+            operand,
+        } => {
+            let exists = *op == IterOp::Exists;
+            for idx in domain_to_indexes(domain, lookups, idx_val_map)? {
+                let mut idx_map = get_index_map(&domain.parts, &idx)?;
+                idx_extend(&mut idx_map, idx_val_map);
+                if check_logic_condition(operand, lookups, &idx_map)? == exists {
+                    return Ok(exists);
+                }
+            }
+            Ok(!exists)
         }
     }
 }
@@ -355,11 +373,31 @@ pub fn compare_terms(lhs: Term, op: &RelOp, rhs: Term) -> Result<bool> {
             RelOp::Le => lhs <= rhs,
         },
         (Term::Str(lhs), Term::Str(rhs)) => match op {
-            RelOp::Eq => lhs == rhs,
-            RelOp::Ne => lhs != rhs,
+            RelOp::Eq | RelOp::EqEq => lhs == rhs,
+            RelOp::Ne | RelOp::Ne2 => lhs != rhs,
             _ => bail!("Can only do string == or != in logic expression"),
         },
         _ => bail!("Vars or mixed terms in domain condition"),
+    })
+}
+
+/// Evaluate the left side of `(a, b) in S` to a set element.
+fn eval_member(lhs: &[Expr], lookups: &Lookups, idx_val_map: &IdxValMap) -> Result<SetVal> {
+    let terminals = lhs
+        .iter()
+        .map(|expr| {
+            Ok(
+                match resolve_terms_to_term(&recurse(expr, lookups, idx_val_map)?)? {
+                    Term::Str(s) => SetValTerminal::Str(s),
+                    Term::Num(n) if n >= 0.0 && n.fract() == 0.0 => SetValTerminal::Int(n as u32),
+                    term => bail!("{term:?} cannot be a set element"),
+                },
+            )
+        })
+        .collect::<Result<SmallVec<[SetValTerminal; 2]>>>()?;
+    Ok(match terminals.as_slice() {
+        [single] => single.into(),
+        _ => SetVal::Tuple(terminals),
     })
 }
 
