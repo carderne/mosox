@@ -60,10 +60,12 @@ pub fn merge_model(entries: Vec<Entry>) -> Result<ModelWithData> {
 }
 
 /// Convert merged model to matrix.
-pub fn generate_matrix(model: ModelWithData) -> Result<Compiled> {
+///
+/// If `prune` is set, vars with no nonzero coefficients are dropped (as GLPK does).
+pub fn generate_matrix(model: ModelWithData, prune: bool) -> Result<Compiled> {
     eprintln!("Generating matrix");
     let t0 = Instant::now();
-    let compiled = gen_matrix(model)?;
+    let compiled = gen_matrix(model, prune)?;
     eprintln!("Matrix compiled in {:?}", t0.elapsed());
 
     let num_rows = compiled.cons.len();

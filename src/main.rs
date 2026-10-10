@@ -31,6 +31,9 @@ enum Commands {
         /// Output file path for MPS output
         #[arg(short, long)]
         output: Option<String>,
+        /// Keep vars that have no nonzero coefficients
+        #[arg(long, default_value_t = false)]
+        no_prune: bool,
     },
     /// Solve with HiGHS
     Solve {
@@ -47,6 +50,9 @@ enum Commands {
         /// Enable verbose logging
         #[arg(short, long, default_value_t = false)]
         verbose: bool,
+        /// Keep vars that have no nonzero coefficients
+        #[arg(long, default_value_t = false)]
+        no_prune: bool,
     },
     /// Normalize an MPS file for diffing
     Normalize { input: String, output: String },
@@ -66,10 +72,11 @@ fn run() -> anyhow::Result<()> {
             path,
             data_path,
             output,
+            no_prune,
         } => {
             let entries = load_model_and_data(path, data_path.as_deref())?;
             let model = merge_model(entries)?;
-            let compiled = generate_matrix(model)?;
+            let compiled = generate_matrix(model, !no_prune)?;
             if let Some(output) = output {
                 matrix_to_mps_file(compiled, stem(path), std::path::Path::new(output))?;
             }
@@ -82,6 +89,7 @@ fn run() -> anyhow::Result<()> {
             highs_config,
             output,
             verbose,
+            no_prune,
         } => {
             let config: Vec<(String, String)> = highs_config
                 .iter()
@@ -96,7 +104,7 @@ fn run() -> anyhow::Result<()> {
                 .collect();
             let entries = load_model_and_data(path, data_path.as_deref())?;
             let model = merge_model(entries)?;
-            let compiled = generate_matrix(model)?;
+            let compiled = generate_matrix(model, !no_prune)?;
             solve_matrix(
                 compiled,
                 format.clone(),

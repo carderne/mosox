@@ -41,7 +41,9 @@ pub struct Compiled {
     pub cons: ConsMap, // rows
 }
 
-pub fn gen_matrix(model: ModelWithData) -> Result<Compiled> {
+/// If `prune` is set, zero coefficients and vars with no nonzero coefficients are
+/// dropped (matching GLPK, which only creates columns for vars with nonzero terms).
+pub fn gen_matrix(model: ModelWithData, prune: bool) -> Result<Compiled> {
     let ModelWithData {
         sense,
         sets,
@@ -53,7 +55,20 @@ pub fn gen_matrix(model: ModelWithData) -> Result<Compiled> {
     let lookups = Lookups::from_model(sets, vars, pars)?;
     check_checks(checks, &lookups)?;
     let cons = build_constraints(constraints, &lookups)?;
-    build_cols_and_rows(sense, cons, &lookups)
+    let mut compiled = build_cols_and_rows(sense, cons, &lookups)?;
+    if prune {
+        prune_zeros(&mut compiled.vars);
+    }
+    Ok(compiled)
+}
+
+/// Remove zero coefficients, then any vars left without coefficients.
+/// Must run after all coefficients are accumulated, as terms can cancel out.
+fn prune_zeros(cols: &mut VarsMap) {
+    cols.retain(|_, v| {
+        v.coeffs.retain(|_, c| *c != 0.0);
+        !v.coeffs.is_empty()
+    });
 }
 
 fn build_cols_and_rows(
