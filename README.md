@@ -2,18 +2,15 @@
 
 An LP matrix generator for [GMPL (MathProg)](https://en.wikibooks.org/wiki/GLPK/GMPL_(MathProg)) and (by extension) [AMPL](https://en.wikipedia.org/wiki/AMPL).
 
-Can be used in two ways:
+Can be used in several ways:
 - Compile an MPS file for solving elsewhere
 - Solve directly with the [HiGHS](https://highs.dev/) integration, no other binary needed
-
-**Currently a work-in-progress.**
+- From Python to pass data directly from Pandas
 
 It works for a subset of GMPL (specifically the subset required to run [Osemosys](https://osemosys.github.io/)).
 See [Known limitations](#known-limitations) section below.
 
 There are a number of examples of varying complexity in the [examples/](./examples/) directory.
-
-Developed by and for [Climate Compatible Growth](https://climatecompatiblegrowth.com/).
 
 ## Quickstart
 
@@ -85,6 +82,7 @@ mosox solve examples/basic/model.mod -o output.txt
 
 ### Python
 Data can be passed from Python as pandas DataFrames (or Series, or pyarrow Tables) instead of a `.dat` file.
+
 Columns are read by position: for a param, the index columns then the value; for a set, the index columns (if indexed) then the members.
 ```python
 import pandas as pd
