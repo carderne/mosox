@@ -12,14 +12,19 @@ install_crate = "rustfmt"
 command = "cargo"
 args = ["fmt"]
 
+[tasks.fmt-check]
+install_crate = "rustfmt"
+command = "cargo"
+args = ["fmt", "--check"]
+
 [tasks.lint]
 install_crate = "clippy"
 command = "cargo"
-args = ["clippy"]
+args = ["clippy", "--locked", "--all-targets", "--all-features", "--", "-D", "warnings"]
 
 [tasks.test]
 command = "cargo"
-args = ["test"]
+args = ["test", "--locked", "--all-features"]
 
 [tasks.testlarge]
 env = { MOSOX_TEST_LARGE = "1" }
@@ -42,7 +47,7 @@ args = ["test", "--release", "--test", "bench_perf", "--", "--ignored", "--nocap
 
 [tasks.ci]
 dependencies = [
-    "fmt",
+    "fmt-check",
     "lint",
     "test"
 ]
@@ -55,7 +60,6 @@ args = ["clean"]
 [tasks.build]
 command = "cargo"
 args = ["build"]
-dependencies = ["clean"]
 
 # Coverage
 [tasks.test-cov]

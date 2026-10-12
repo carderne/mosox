@@ -1,7 +1,7 @@
 [package]
 name = "mosox"
 license = "MIT"
-authors = ["Chris Arderne <chris@rdrn.me"]
+authors = ["Chris Arderne <chris@rdrn.me>"]
 description = "LP matrix generator for GMPL"
 version = "0.0.999"  # set by Github Actions CI
 edition = "2024"

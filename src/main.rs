@@ -15,6 +15,8 @@ use mosox::{
     stem,
 };
 
+const MAX_DIFFS_SHOWN: usize = 20;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
@@ -44,7 +46,7 @@ enum Commands {
         /// Solver options as KEY=VALUE pairs (e.g. -c threads=4 -c log_file=out.txt)
         #[arg(short = 'c', long = "config", value_name = "KEY=VALUE")]
         highs_config: Vec<String>,
-        /// Output file path for MPS output
+        /// Output file path for the solution
         #[arg(short, long)]
         output: Option<String>,
         /// Enable verbose logging
@@ -113,7 +115,7 @@ fn run() -> anyhow::Result<()> {
                 .iter()
                 .map(|s| {
                     let (k, v) = s.split_once('=').unwrap_or_else(|| {
-                        eprintln!("Warning: --highs-config value {s:?} has no '=', ignoring");
+                        eprintln!("Warning: --config value {s:?} has no '=', ignoring");
                         ("", "")
                     });
                     (k.to_string(), v.to_string())
@@ -133,8 +135,11 @@ fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Commands::Normalize { input, output } => {
-            let reader = BufReader::new(File::open(input).expect("cannot open input file"));
-            let writer = BufWriter::new(File::create(output).expect("cannot create output file"));
+            let reader =
+                BufReader::new(File::open(input).with_context(|| format!("cannot open {input}"))?);
+            let writer = BufWriter::new(
+                File::create(output).with_context(|| format!("cannot create {output}"))?,
+            );
             mosox::normalize::normalize_mps(reader, writer);
             Ok(())
         }
@@ -143,23 +148,21 @@ fn run() -> anyhow::Result<()> {
             actual,
             epsilon,
         } => {
-            let exp_reader =
-                BufReader::new(File::open(expected).expect("cannot open expected file"));
-            let act_reader = BufReader::new(File::open(actual).expect("cannot open actual file"));
+            let exp_reader = BufReader::new(
+                File::open(expected).with_context(|| format!("cannot open {expected}"))?,
+            );
+            let act_reader = BufReader::new(
+                File::open(actual).with_context(|| format!("cannot open {actual}"))?,
+            );
             let diffs = mosox::normalize::compare_mps(exp_reader, act_reader, *epsilon);
             if diffs.is_empty() {
                 println!("Files match within epsilon {epsilon}");
             } else {
-                let shown = if diffs.len() > 20 {
-                    &diffs[..20]
-                } else {
-                    &diffs
-                };
-                for d in shown {
+                for d in diffs.iter().take(MAX_DIFFS_SHOWN) {
                     println!("{d}");
                 }
-                if diffs.len() > 20 {
-                    println!("... and {} more", diffs.len() - 20);
+                if diffs.len() > MAX_DIFFS_SHOWN {
+                    println!("... and {} more", diffs.len() - MAX_DIFFS_SHOWN);
                 }
                 println!("\n{} total differences", diffs.len());
                 anyhow::bail!("MPS files differ");

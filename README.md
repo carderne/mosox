@@ -37,7 +37,7 @@ Usage overview:
 ```bash
 mosox help
 
-MathProg Translation Kit
+LP matrix generator for GMPL
 
 Usage: mosox <COMMAND>
 
@@ -55,12 +55,12 @@ Options:
 
 ### Compile MPS
 Compile MPS for one of the examples in this repo.
-Output will be written to to the provided file:
+Output will be written to the provided file:
 ```bash
 mosox compile examples/basic/model.mod -o output.mps
 ```
 
-Or an example with a separate data file, piping MPS to a file:
+Or an example with a separate data file, writing MPS to a file:
 ```bash
 mosox compile examples/sets/model.mod examples/sets/data.dat -o output.mps
 ```
@@ -77,7 +77,7 @@ mosox solve examples/basic/model.mod -o output.txt
 # Solving matrix with HiGHS
 # Solved in 1.939083ms
 # Objective value: 2200
-# Results output to f.txt
+# Results output to output.txt
 ```
 
 ### Python
@@ -109,7 +109,11 @@ You can view available commands by running `cargo make`.
 ```bash
 cargo make fmt
 cargo make lint
+cargo make ci  # fmt-check, lint, test (same as CI)
 ```
+
+`lint` and `test` enable all features, including the Python bindings, which need Python >= 3.11.
+If your default `python3` is older, point PyO3 at a newer one, e.g. `export PYO3_PYTHON=$PWD/.venv/bin/python` after `uv sync`.
 
 ### Testing
 In addition to other tests, this will run mosox against all the examples under `examples/` and confirm that the output is identical to the existing MPS files.
@@ -156,7 +160,7 @@ Note that some of the performance advantage over glpsol may be caused by the lim
 ### Memory usage
 
 The matrix generator uses very roughly 2,000 bytes per non-zero.
-This is a significant overhead over the 12 bytes bytes per non-zero that would be needed in a format like CSC.
+This is a significant overhead over the 12 bytes per non-zero that would be needed in a format like CSC.
 However, as the table below shows, the matrix generator will rarely (if ever) use more memory than the solver.
 
 | Example          | Mosox matrix | Glpsol matrix | HiGHS solver | Glpsol solver |
