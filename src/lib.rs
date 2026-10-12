@@ -15,7 +15,7 @@ mod python;
 use std::path::Path;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 pub use crate::data::{DatSource, DataSource, TableSource};
 pub use crate::highs::format::Format;
@@ -61,14 +61,15 @@ pub fn generate_matrix(
 /// Matrix in MPS format.
 pub fn matrix_to_mps_string(compiled: &Compiled, model_name: &str) -> String {
     let mut buf = Vec::new();
-    write_mps(compiled, model_name, &mut buf);
+    write_mps(compiled, model_name, &mut buf).expect("writing to a Vec cannot fail");
     String::from_utf8(buf).expect("MPS output is UTF-8")
 }
 
 /// Print matrix in MPS format to stdout.
-pub fn matrix_to_mps(compiled: &Compiled, model_name: &str) {
+pub fn matrix_to_mps(compiled: &Compiled, model_name: &str) -> Result<()> {
     eprintln!("Outputting MPS to stdout");
-    print_mps(compiled, model_name);
+    print_mps(compiled, model_name)?;
+    Ok(())
 }
 
 /// Write matrix in MPS format to a file.
@@ -78,7 +79,8 @@ pub fn matrix_to_mps_file(
     path: &std::path::Path,
 ) -> Result<()> {
     eprintln!("Outputting MPS to {}", path.display());
-    write_mps_to_file(compiled, model_name, path)?;
+    write_mps_to_file(compiled, model_name, path)
+        .with_context(|| format!("writing MPS to {}", path.display()))?;
     Ok(())
 }
 
@@ -96,7 +98,8 @@ pub fn solve_matrix(
     eprintln!("Solved in {:?}", t0.elapsed());
     eprintln!("Objective value: {}", solution.objective_value);
     if let Some(path) = output {
-        write_solution(solution, format, path);
+        write_solution(solution, format, path)
+            .with_context(|| format!("writing solution to {}", path.display()))?;
         eprintln!("Results output to {}", path.display());
     }
     Ok(())

@@ -65,9 +65,9 @@ fn compile(model: &Model, data: TableSource) -> anyhow::Result<String> {
 fn transport_from_tables_matches_reference() {
     let mps = compile(&transport(), transport_data(10)).unwrap();
     let mut normalized = vec![];
-    normalize_mps(mps.as_bytes(), &mut normalized);
+    normalize_mps(mps.as_bytes(), &mut normalized).unwrap();
     let expected = std::fs::read("examples/2d_params/matrix.mps").unwrap();
-    let diffs = compare_mps(expected.as_slice(), normalized.as_slice(), 0.0);
+    let diffs = compare_mps(expected.as_slice(), normalized.as_slice(), 0.0).unwrap();
     assert!(diffs.is_empty(), "{diffs:#?}");
 }
 

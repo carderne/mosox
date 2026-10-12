@@ -69,12 +69,12 @@ fn regression_examples() {
 
         let raw_reader = BufReader::new(File::open(&raw_output).unwrap());
         let writer = File::create(&normalized_output).unwrap();
-        normalize_mps(raw_reader, writer);
+        normalize_mps(raw_reader, writer).unwrap();
 
         // Compare expected vs normalized output with epsilon tolerance
         let expected_reader = BufReader::new(File::open(&mps_file).unwrap());
         let actual_reader = BufReader::new(File::open(&normalized_output).unwrap());
-        let diffs = compare_mps(expected_reader, actual_reader, EPSILON);
+        let diffs = compare_mps(expected_reader, actual_reader, EPSILON).unwrap();
 
         if !diffs.is_empty() {
             let shown: String = if diffs.len() > 20 {

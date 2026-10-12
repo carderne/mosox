@@ -140,7 +140,7 @@ fn run() -> anyhow::Result<()> {
             let writer = BufWriter::new(
                 File::create(output).with_context(|| format!("cannot create {output}"))?,
             );
-            mosox::normalize::normalize_mps(reader, writer);
+            mosox::normalize::normalize_mps(reader, writer)?;
             Ok(())
         }
         Commands::Compare {
@@ -154,7 +154,7 @@ fn run() -> anyhow::Result<()> {
             let act_reader = BufReader::new(
                 File::open(actual).with_context(|| format!("cannot open {actual}"))?,
             );
-            let diffs = mosox::normalize::compare_mps(exp_reader, act_reader, *epsilon);
+            let diffs = mosox::normalize::compare_mps(exp_reader, act_reader, *epsilon)?;
             if diffs.is_empty() {
                 println!("Files match within epsilon {epsilon}");
             } else {

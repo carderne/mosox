@@ -1,66 +1,73 @@
 use std::fmt::Write as _;
-use std::io::BufWriter;
-use std::io::Write;
+use std::io::{self, BufWriter, Write};
 
 use crate::highs::format::Format;
 use crate::ir::interner::intern_resolve;
 
 use super::{SolutionData, SolutionRow};
 
-pub fn write_solution(data: SolutionData, format: Format, output: &std::path::Path) {
-    let file = std::fs::File::create(output).expect("cannot create output file");
+pub fn write_solution(
+    data: SolutionData,
+    format: Format,
+    output: &std::path::Path,
+) -> io::Result<()> {
+    let file = std::fs::File::create(output)?;
     let mut w = BufWriter::with_capacity(256 * 1024, file);
     match format {
-        Format::Txt => write_txt(&mut w, data),
-        Format::Csv => write_csv(&mut w, data),
+        Format::Txt => write_txt(&mut w, data)?,
+        Format::Csv => write_csv(&mut w, data)?,
     };
+    // Flush explicitly: BufWriter's flush on drop ignores errors
+    w.flush()
 }
 
-fn write_txt(w: &mut impl Write, data: SolutionData) {
-    let _ = writeln!(w, "OBJECTIVE VALUE\n{:.3}", data.objective_value);
+fn write_txt(w: &mut impl Write, data: SolutionData) -> io::Result<()> {
+    writeln!(w, "OBJECTIVE VALUE\n{:.3}", data.objective_value)?;
 
-    let _ = writeln!(w, "\nCONSTRAINTS");
+    writeln!(w, "\nCONSTRAINTS")?;
     for row in &data.constraints {
-        let _ = writeln!(
+        writeln!(
             w,
             "{} = {:.3}; marginal = {:.3}",
             row.name(),
             row.value,
             row.marginal
-        );
+        )?;
     }
 
-    let _ = writeln!(w, "\nVARS");
+    writeln!(w, "\nVARS")?;
     for row in &data.variables {
-        let _ = writeln!(
+        writeln!(
             w,
             "{} = {:.3}; marginal = {:.3}",
             row.name(),
             row.value,
             row.marginal
-        );
+        )?;
     }
+    Ok(())
 }
 
-fn write_csv(w: &mut impl Write, data: SolutionData) {
-    let _ = writeln!(w, "type,name,value,marginal");
-    let _ = writeln!(
+fn write_csv(w: &mut impl Write, data: SolutionData) -> io::Result<()> {
+    writeln!(w, "type,name,value,marginal")?;
+    writeln!(
         w,
         "objective,{},{:.3},{:.3}",
         data.objective_name, data.objective_value, 0.0
-    );
+    )?;
     for row in &data.constraints {
-        let _ = writeln!(
+        writeln!(
             w,
             "constraint,{},{:.3},{:.3}",
             row.name(),
             row.value,
             row.marginal
-        );
+        )?;
     }
     for row in &data.variables {
-        let _ = writeln!(w, "var,{},{:.3},{:.3}", row.name(), row.value, row.marginal);
+        writeln!(w, "var,{},{:.3},{:.3}", row.name(), row.value, row.marginal)?;
     }
+    Ok(())
 }
 
 impl SolutionRow {

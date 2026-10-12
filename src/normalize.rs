@@ -1,6 +1,6 @@
 //! MPS file normalizer for deterministic diffing in regression tests.
 
-use std::io::{BufRead, Write};
+use std::io::{self, BufRead, Write};
 
 const SECTION_HEADERS: &[&str] = &[
     "NAME", "ROWS", "COLUMNS", "RHS", "RANGES", "BOUNDS", "ENDATA",
@@ -45,22 +45,23 @@ fn flush_section(
     integer_lines: &mut Vec<String>,
     current_section: Option<&str>,
     writer: &mut impl Write,
-) {
+) -> io::Result<()> {
     section_lines.sort();
     for sl in section_lines.iter() {
-        writeln!(writer, "{sl}").unwrap();
+        writeln!(writer, "{sl}")?;
     }
     section_lines.clear();
 
     if current_section == Some("COLUMNS") && !integer_lines.is_empty() {
-        writeln!(writer, "M0000001 'MARKER' 'INTORG'").unwrap();
+        writeln!(writer, "M0000001 'MARKER' 'INTORG'")?;
         integer_lines.sort();
         for sl in integer_lines.iter() {
-            writeln!(writer, "{sl}").unwrap();
+            writeln!(writer, "{sl}")?;
         }
-        writeln!(writer, "M0000001 'MARKER' 'INTEND'").unwrap();
+        writeln!(writer, "M0000001 'MARKER' 'INTEND'")?;
         integer_lines.clear();
     }
+    Ok(())
 }
 
 /// Normalize an MPS file for deterministic comparison.
@@ -69,14 +70,14 @@ fn flush_section(
 /// and sorts lines within each section. Does not round numeric values — epsilon
 /// comparison should be used when comparing normalized files.
 /// Primarily used to produce stable output for regression test diffing.
-pub fn normalize_mps(reader: impl BufRead, mut writer: impl Write) {
+pub fn normalize_mps(reader: impl BufRead, mut writer: impl Write) -> io::Result<()> {
     let mut current_section: Option<&str> = None;
     let mut section_lines: Vec<String> = Vec::new();
     let mut integer_lines: Vec<String> = Vec::new();
     let mut in_integer_block = false;
 
     for line in reader.lines() {
-        let line = line.expect("failed to read line");
+        let line = line?;
         let line = line.trim_end_matches(['\n', '\r']);
 
         if line.starts_with('*') {
@@ -92,11 +93,11 @@ pub fn normalize_mps(reader: impl BufRead, mut writer: impl Write) {
                 &mut integer_lines,
                 current_section,
                 &mut writer,
-            );
+            )?;
 
             current_section = SECTION_HEADERS.iter().find(|&&h| h == first_word).copied();
             in_integer_block = false;
-            writeln!(writer, "{}", normalize_whitespace(line)).unwrap();
+            writeln!(writer, "{}", normalize_whitespace(line))?;
         } else {
             let normalized = normalize_whitespace(line);
             if normalized.is_empty() {
@@ -125,14 +126,19 @@ pub fn normalize_mps(reader: impl BufRead, mut writer: impl Write) {
         &mut integer_lines,
         current_section,
         &mut writer,
-    );
+    )?;
+    writer.flush()
 }
 
 /// Compare two normalized MPS files line-by-line with epsilon tolerance for
 /// numeric values. Returns a list of difference descriptions (empty if files match).
-pub fn compare_mps(expected: impl BufRead, actual: impl BufRead, epsilon: f64) -> Vec<String> {
-    let expected_lines: Vec<String> = expected.lines().map(|l| l.unwrap()).collect();
-    let actual_lines: Vec<String> = actual.lines().map(|l| l.unwrap()).collect();
+pub fn compare_mps(
+    expected: impl BufRead,
+    actual: impl BufRead,
+    epsilon: f64,
+) -> io::Result<Vec<String>> {
+    let expected_lines = expected.lines().collect::<io::Result<Vec<_>>>()?;
+    let actual_lines = actual.lines().collect::<io::Result<Vec<_>>>()?;
 
     let mut diffs = Vec::new();
 
@@ -166,7 +172,7 @@ pub fn compare_mps(expected: impl BufRead, actual: impl BufRead, epsilon: f64) -
         }
     }
 
-    diffs
+    Ok(diffs)
 }
 
 fn tokens_match(expected: &str, actual: &str, epsilon: f64) -> bool {
