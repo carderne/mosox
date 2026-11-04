@@ -1405,6 +1405,37 @@ impl Domain {
 
         Ok(Self { parts, condition })
     }
+
+    /// Names for each index position: the dummy, and the set for parts like `r in REGION`.
+    /// A part over a multi-dimensional set without a tuple dummy counts as one position.
+    pub fn index_names(&self) -> Vec<IndexName> {
+        let mut names = vec![];
+        for part in &self.parts {
+            let set = match &part.expr {
+                SetExpr::Atom(SetAtom::Ref(r)) => Some(r.spur),
+                _ => None,
+            };
+            match &part.var {
+                DomainPartVar::Single(var) => names.push(IndexName {
+                    dummy: Some(*var),
+                    set,
+                }),
+                DomainPartVar::Tuple(vars) => names.extend(vars.iter().map(|v| IndexName {
+                    dummy: Some(*v),
+                    set: None,
+                })),
+                DomainPartVar::None => names.push(IndexName { dummy: None, set }),
+            }
+        }
+        names
+    }
+}
+
+/// Names that can identify one index position of a domain
+#[derive(Clone, Copy, Debug)]
+pub struct IndexName {
+    pub dummy: Option<Spur>,
+    pub set: Option<Spur>,
 }
 
 /// Single domain part (e.g., "r in REGION")

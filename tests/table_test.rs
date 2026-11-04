@@ -28,6 +28,14 @@ fn table(cols: Vec<ArrayRef>) -> RecordBatch {
     .unwrap()
 }
 
+fn named(cols: Vec<(&str, ArrayRef)>) -> RecordBatch {
+    RecordBatch::try_from_iter(cols).unwrap()
+}
+
+fn nums(vals: &[f64]) -> ArrayRef {
+    Arc::new(Float64Array::from(vals.to_vec()))
+}
+
 fn transport_data(cost_p1_w1: i64) -> TableSource {
     let mut data = TableSource::new();
     data.add("PLANTS", table(vec![strs(&["P1", "P2"])]))
@@ -139,4 +147,73 @@ fn table_errors() {
         let err = format!("{:#}", compile(&model, data).unwrap_err());
         assert!(err.contains(expected), "expected {expected:?} in {err:?}");
     }
+}
+
+#[test]
+fn param_columns_matched_by_name() {
+    let mut data = transport_data(10);
+    // Set names, out of order, with the value first
+    data.add(
+        "cost",
+        named(vec![
+            ("VALUE", nums(&[99.0])),
+            ("WAREHOUSES", strs(&["W1"])),
+            ("PLANTS", strs(&["P1"])),
+        ]),
+    );
+    let mps = compile(&transport(), data).unwrap();
+    assert!(mps.contains(" ship[P1,W1] total_cost 99\n"), "{mps}");
+
+    // Dummy names work too, and unrecognised names are read by position
+    let mut data = transport_data(10);
+    data.add(
+        "cost",
+        named(vec![
+            ("w", strs(&["W1"])),
+            ("p", strs(&["P1"])),
+            ("v", nums(&[98.0])),
+        ]),
+    );
+    let mps = compile(&transport(), data).unwrap();
+    assert!(mps.contains(" ship[P1,W1] total_cost 98\n"), "{mps}");
+}
+
+#[test]
+fn value_only_table_fills_indexed_param() {
+    let model = Model::from_file("examples/2d_params/model.mod").unwrap();
+    let mut data = TableSource::new();
+    data.add("cost", named(vec![("VALUE", nums(&[7.0]))]));
+    let mps = compile(&model, data).unwrap();
+    assert!(mps.contains(" ship[P1,W1] total_cost 7\n"), "{mps}");
+    assert!(mps.contains(" ship[P2,W3] total_cost 7\n"), "{mps}");
+
+    let mut data = TableSource::new();
+    data.add("cost", named(vec![("VALUE", nums(&[7.0, 8.0]))]));
+    let err = format!("{:#}", compile(&model, data).unwrap_err());
+    assert!(err.contains("must have one non-null value"), "{err}");
+}
+
+#[test]
+fn patch_updates_model_file_data() {
+    // The full transport model, with its own `data;` section
+    let model = Model::from_file("examples/2d_params/model.mod").unwrap();
+    let mut data = TableSource::new();
+    data.add(
+        "cost",
+        table(vec![strs(&["P2"]), strs(&["W3"]), nums(&[55.0])]),
+    )
+    .set_patch("cost");
+    let mps = compile(&model, data).unwrap();
+    assert!(mps.contains(" ship[P2,W3] total_cost 55\n"), "{mps}");
+    assert!(mps.contains(" ship[P1,W2] total_cost 15\n"), "{mps}");
+
+    // Without patching, the table replaces the model file's data
+    let mut data = TableSource::new();
+    data.add(
+        "cost",
+        table(vec![strs(&["P2"]), strs(&["W3"]), nums(&[55.0])]),
+    )
+    .set_default("cost", 1.0);
+    let mps = compile(&model, data).unwrap();
+    assert!(mps.contains(" ship[P1,W2] total_cost 1\n"), "{mps}");
 }

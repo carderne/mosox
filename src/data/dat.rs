@@ -82,6 +82,7 @@ impl DataSource for DatSource {
         Ok(Some(ParamValues {
             values: data.body.map(body_to_data).transpose()?.unwrap_or_default(),
             default: data.default,
+            patch: false,
         }))
     }
 }
