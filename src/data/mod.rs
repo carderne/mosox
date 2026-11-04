@@ -101,7 +101,7 @@ pub(crate) fn set_dimen(decl: &ir::Set, sets: &HashMap<Spur, &ir::Set>) -> usize
     decl.expr.as_ref().map_or(1, |e| expr_dimen(e, sets))
 }
 
-fn expr_dimen(expr: &SetExpr, sets: &HashMap<Spur, &ir::Set>) -> usize {
+pub(crate) fn expr_dimen(expr: &SetExpr, sets: &HashMap<Spur, &ir::Set>) -> usize {
     match expr {
         SetExpr::InfixOp { lhs, .. } => expr_dimen(lhs, sets),
         SetExpr::Atom(SetAtom::Ref(r)) => sets.get(&r.spur).map_or(1, |s| set_dimen(s, sets)),

@@ -237,6 +237,10 @@ fn element(cell: Option<ParamVal>) -> Result<SetValTerminal> {
 
 /// Read a column as `.dat`-style values, with None for nulls
 fn cells(col: &dyn Array) -> Result<Vec<Option<ParamVal>>> {
+    // eg an empty column with no type
+    if col.data_type().is_null() {
+        return Ok(vec![None; col.len()]);
+    }
     macro_rules! numeric {
         ($($t:ty),*) => {$(
             if let Some(a) = col.as_primitive_opt::<$t>() {

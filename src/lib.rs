@@ -15,12 +15,13 @@ mod python;
 use std::path::Path;
 use std::time::Instant;
 
+use ::highs::HighsModelStatus;
 use anyhow::{Context, Result};
 
 pub use crate::data::{DatSource, DataSource, TableSource};
 pub use crate::highs::format::Format;
-use crate::highs::highs_solve;
 use crate::highs::output::write_solution;
+use crate::highs::{highs_solve, status_name};
 pub use crate::ir::model::Model;
 pub use crate::matrix::{Compiled, GenOptions};
 use crate::mps::output::{print_mps, write_mps, write_mps_to_file};
@@ -94,7 +95,12 @@ pub fn solve_matrix(
 ) -> Result<()> {
     eprintln!("Solving matrix with HiGHS");
     let t0 = Instant::now();
-    let solution = highs_solve(compiled, config, verbose)?;
+    let solution = highs_solve(&compiled, config, verbose)?;
+    anyhow::ensure!(
+        solution.status == HighsModelStatus::Optimal,
+        "HiGHS did not find an optimal solution: {}",
+        status_name(solution.status)
+    );
     eprintln!("Solved in {:?}", t0.elapsed());
     eprintln!("Objective value: {}", solution.objective_value);
     if let Some(path) = output {
