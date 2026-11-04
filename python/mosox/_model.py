@@ -1,4 +1,4 @@
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from os import PathLike
 from time import perf_counter
@@ -6,6 +6,7 @@ from typing import Literal, Self
 
 from mosox import _mosox
 from mosox._data import Data, Value, _layers
+from mosox._run import Run, Scenario
 from mosox._solution import Solution, Stats
 
 Option = str | int | float | bool
@@ -90,6 +91,41 @@ class Model:
         """Compile and solve with HiGHS. See `Matrix.solve`."""
         matrix = self.compile(data, prune=prune, check=check)
         return matrix.solve(options=options, verbose=verbose, keep=keep)
+
+    def run(
+        self,
+        scenarios: Iterable[Scenario],
+        base: Data | Mapping[str, Value] | None = None,
+        *,
+        workers: int = 1,
+        prune: bool = True,
+        check: bool = True,
+        options: Mapping[str, Option] | None = None,
+        keep: Collection[str] | None = None,
+        store: str | PathLike[str] | None = None,
+        resume: bool = False,
+    ) -> Run:
+        """Solve each scenario's updates to `base`. Nothing runs until the returned `Run` is
+        iterated (for events as they happen) or its `results()` are asked for.
+
+        `workers` scenarios run at once, each with HiGHS `threads=1` unless `options` says otherwise.
+        With a `store` directory, each scenario's solution is written there as it finishes, rather than
+        kept in memory, and `resume` skips any already stored (other than failures)."""
+        base = base if isinstance(base, Data) else Data(base)
+        options = dict(options or {})
+        if workers > 1:
+            options.setdefault("threads", 1)
+        self._check_keep(keep)
+
+        return Run(
+            lambda data: self.compile(data, prune=prune, check=check),
+            lambda matrix, scenario_options: matrix.solve(options={**options, **scenario_options}, keep=keep),
+            list(scenarios),
+            base,
+            workers=workers,
+            store=store,
+            resume=resume,
+        )
 
     def _check_keep(self, keep: Collection[str] | None) -> None:
         unknown = sorted(set(keep or ()) - set(self.variables) - set(self.constraints))
