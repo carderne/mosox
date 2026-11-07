@@ -17,6 +17,26 @@ pub type SetValues = HashMap<Index, SetVals>;
 pub struct ParamValues {
     pub values: HashMap<Index, ParamVal>,
     pub default: Option<ParamVal>,
+    /// Whether `values` update those of lower layers, rather than replacing them
+    pub patch: bool,
+}
+
+impl ParamValues {
+    /// These values layered over `lower`, whose default applies unless this gives one
+    fn over(self, mut lower: ParamValues) -> ParamValues {
+        let values = match self.patch {
+            true => {
+                lower.values.extend(self.values);
+                lower.values
+            }
+            false => self.values,
+        };
+        ParamValues {
+            values,
+            default: self.default.or(lower.default),
+            patch: self.patch && lower.patch,
+        }
+    }
 }
 
 /// Provides set and param data to a model.
@@ -30,7 +50,22 @@ pub trait DataSource {
     fn take_param(&mut self, decl: &ir::Param) -> Result<Option<ParamValues>>;
 }
 
-/// Combines two sources; `.0` takes precedence
+impl<T: DataSource + ?Sized> DataSource for Box<T> {
+    fn names(&self) -> Vec<Spur> {
+        (**self).names()
+    }
+
+    fn take_set(&mut self, decl: &ir::Set, dimen: usize) -> Result<Option<SetValues>> {
+        (**self).take_set(decl, dimen)
+    }
+
+    fn take_param(&mut self, decl: &ir::Param) -> Result<Option<ParamValues>> {
+        (**self).take_param(decl)
+    }
+}
+
+/// Combines two sources, with `.0` layered over `.1`:
+/// its sets replace those of `.1`, and its params replace or patch them
 pub(crate) struct Layered<A, B>(pub A, pub B);
 
 impl<A: DataSource, B: DataSource> DataSource for Layered<A, B> {
@@ -48,10 +83,10 @@ impl<A: DataSource, B: DataSource> DataSource for Layered<A, B> {
     }
 
     fn take_param(&mut self, decl: &ir::Param) -> Result<Option<ParamValues>> {
-        match self.0.take_param(decl)? {
-            Some(values) => Ok(Some(values)),
-            None => self.1.take_param(decl),
-        }
+        Ok(match (self.0.take_param(decl)?, self.1.take_param(decl)?) {
+            (Some(top), Some(lower)) => Some(top.over(lower)),
+            (top, lower) => top.or(lower),
+        })
     }
 }
 
@@ -66,7 +101,7 @@ pub(crate) fn set_dimen(decl: &ir::Set, sets: &HashMap<Spur, &ir::Set>) -> usize
     decl.expr.as_ref().map_or(1, |e| expr_dimen(e, sets))
 }
 
-fn expr_dimen(expr: &SetExpr, sets: &HashMap<Spur, &ir::Set>) -> usize {
+pub(crate) fn expr_dimen(expr: &SetExpr, sets: &HashMap<Spur, &ir::Set>) -> usize {
     match expr {
         SetExpr::InfixOp { lhs, .. } => expr_dimen(lhs, sets),
         SetExpr::Atom(SetAtom::Ref(r)) => sets.get(&r.spur).map_or(1, |s| set_dimen(s, sets)),

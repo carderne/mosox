@@ -8,13 +8,19 @@ use lasso::Spur;
 
 use crate::data::{DataSource, ParamValues, SetValues};
 use crate::ir::interner::{intern, intern_resolve};
-use crate::ir::{self, Index, ParamVal, SetVal, SetValTerminal};
+use crate::ir::{self, Index, IndexName, ParamVal, SetVal, SetValTerminal};
 
 /// Data from in-memory Arrow tables, one per set or param.
 ///
-/// Columns are read by position, not name:
+/// Columns are read by position:
 /// - param: the index columns, then the value
 /// - set: the index columns (if indexed), then one column per member dimension
+///
+/// Except that a param's index columns are matched by name if each is named for
+/// a different domain position, by its set (`REGION` in `{r in REGION}`) or dummy (`r`),
+/// with one other column for the value.
+///
+/// A param table with only a value column gives an indexed param that value everywhere.
 ///
 /// Values are read as in `.dat` files: numeric columns and numeric strings are numbers
 /// (and integer set elements), other strings are symbolic.
@@ -28,6 +34,7 @@ pub struct TableSource {
 struct Table {
     batches: Vec<RecordBatch>,
     default: Option<f64>,
+    patch: bool,
 }
 
 impl TableSource {
@@ -48,6 +55,13 @@ impl TableSource {
     /// Set a param's default, as `.dat`'s `param p default 0 := ...`
     pub fn set_default(&mut self, name: &str, value: f64) -> &mut Self {
         self.tables.entry(intern(name)).or_default().default = Some(value);
+        self
+    }
+
+    /// When layered over other data, update a param's values rather than replacing them.
+    /// Data with only a default always does this.
+    pub fn set_patch(&mut self, name: &str) -> &mut Self {
+        self.tables.entry(intern(name)).or_default().patch = true;
         self
     }
 }
@@ -95,10 +109,25 @@ impl DataSource for TableSource {
         let Some(table) = self.tables.remove(&decl.name) else {
             return Ok(None);
         };
-        table.num_columns()?;
+        let num_columns = table.num_columns()?;
+        if table.batches.is_empty() {
+            return Ok(Some(ParamValues {
+                values: HashMap::new(),
+                default: table.default.map(ParamVal::Num),
+                patch: true,
+            }));
+        }
+        if num_columns == 1 && decl.domain.is_some() {
+            return table.fill();
+        }
+        let names = (decl.domain.as_ref()).map_or(vec![], |d| d.index_names());
         let mut values = HashMap::new();
         for batch in &table.batches {
-            let cols = columns(batch)?;
+            let mut cols = columns(batch)?;
+            if let Some(order) = order_by_name(batch, &names) {
+                let mut taken: Vec<_> = cols.into_iter().map(Some).collect();
+                cols = order.iter().map(|&i| taken[i].take().unwrap()).collect();
+            }
             let Some((value_col, index_cols)) = cols.split_last() else {
                 bail!(
                     "table for param '{}' has no columns",
@@ -114,11 +143,35 @@ impl DataSource for TableSource {
         Ok(Some(ParamValues {
             values,
             default: table.default.map(ParamVal::Num),
+            patch: table.patch,
         }))
     }
 }
 
 impl Table {
+    /// A single value for every index, given as the default
+    fn fill(&self) -> Result<Option<ParamValues>> {
+        let cells: Vec<_> = (self.batches.iter())
+            .map(|b| cells(b.column(0).as_ref()))
+            .collect::<Result<Vec<_>>>()?
+            .concat();
+        let [Some(value)] = cells[..] else {
+            bail!(
+                "a table with only a value column must have one non-null value, not {} rows",
+                cells.len()
+            );
+        };
+        ensure!(
+            self.default.is_none(),
+            "both a value for every index and a default were given"
+        );
+        Ok(Some(ParamValues {
+            values: HashMap::new(),
+            default: Some(value),
+            patch: false,
+        }))
+    }
+
     fn num_columns(&self) -> Result<usize> {
         let counts: Vec<usize> = self.batches.iter().map(|b| b.num_columns()).collect();
         ensure!(
@@ -127,6 +180,29 @@ impl Table {
         );
         Ok(counts.first().copied().unwrap_or(0))
     }
+}
+
+/// Column order (index columns, then value) if each index column is named for its position
+fn order_by_name(batch: &RecordBatch, names: &[IndexName]) -> Option<Vec<usize>> {
+    let schema = batch.schema();
+    let fields: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+    if names.is_empty() || fields.len() != names.len() + 1 {
+        return None;
+    }
+    let mut order = vec![];
+    for name in names {
+        let matches = |field: &str| {
+            [name.dummy, name.set]
+                .into_iter()
+                .flatten()
+                .any(|n| intern_resolve(n) == field)
+        };
+        let i = (0..fields.len()).find(|i| !order.contains(i) && matches(fields[*i]))?;
+        order.push(i);
+    }
+    let value = (0..fields.len()).find(|i| !order.contains(i))?;
+    order.push(value);
+    Some(order)
 }
 
 fn columns(batch: &RecordBatch) -> Result<Vec<Vec<Option<ParamVal>>>> {
@@ -161,6 +237,10 @@ fn element(cell: Option<ParamVal>) -> Result<SetValTerminal> {
 
 /// Read a column as `.dat`-style values, with None for nulls
 fn cells(col: &dyn Array) -> Result<Vec<Option<ParamVal>>> {
+    // eg an empty column with no type
+    if col.data_type().is_null() {
+        return Ok(vec![None; col.len()]);
+    }
     macro_rules! numeric {
         ($($t:ty),*) => {$(
             if let Some(a) = col.as_primitive_opt::<$t>() {

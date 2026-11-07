@@ -81,17 +81,46 @@ mosox solve examples/basic/model.mod -o output.txt
 ```
 
 ### Python
-Data can be passed from Python as pandas DataFrames (or Series, or pyarrow Tables) instead of a `.dat` file.
-
-Columns are read by position: for a param, the index columns then the value; for a set, the index columns (if indexed) then the members.
+Data can be passed from Python instead of (or on top of) a `.dat` file:
+pandas DataFrames or Series, pyarrow Tables, or plain values.
 ```python
-import pandas as pd
 import mosox
 
 model = mosox.Model.from_file("examples/2d_params/model.mod")
-solution = model.solve({"supply": pd.DataFrame({"plant": ["P1", "P2"], "value": [100, 150]}), ...})
-solution.objective
-solution["ship"]  # DataFrame with columns p, w, value, marginal
+solution = model.solve({
+    "PLANTS": ["P1", "P2"],
+    "supply": {"P1": 100, "P2": 150},
+    "cost": df,  # PLANTS, WAREHOUSES, VALUE (matched by name, else read by position)
+    ...
+})
+solution.status, solution.objective
+solution["ship"]  # DataFrame with columns PLANTS, WAREHOUSES, VALUE, MARGINAL
+```
+
+A param table's index columns are matched by name if they're named for the domain's sets or dummies
+(`REGION` or `r` in `{r in REGION}`), and otherwise read by position: the index columns, then the value.
+A single value fills an indexed param.
+
+`Data` layers data, eg a `.dat` file (parsed once) or [otoole](https://github.com/OSeMOSYS/otoole) data,
+patched or replaced for each scenario:
+```python
+base = mosox.Data.from_dat("ose.dat")
+base = mosox.Data.from_otoole(*otoole.read("config.yaml", "csv", "data/"))
+model.solve(base.update({"CapitalCost": cheap_solar}, defaults={"EmissionsPenalty": 0}))
+```
+
+Scenarios run with progress events, in parallel, optionally writing each solution to a store:
+```python
+scenarios = mosox.product(
+    carbon={"low": {"EmissionsPenalty": 10}, "high": {"EmissionsPenalty": 100}},
+    discount={r: {"DiscountRate": r} for r in [0.03, 0.05]},
+)
+run = model.run(scenarios, base, workers=4, keep=["NewCapacity"], store="results/")
+for event in run:  # Started, Compiled, Finished, Failed, Skipped (also `async for`)
+    print(f"{event.done}/{event.total}", type(event).__name__, event.scenario.name)
+results = run.results()  # or mosox.Results.open("results/")
+results.summary          # a row per scenario: coords, status, objective, timings
+results["NewCapacity"]   # all scenarios, with scenario and coord columns first
 ```
 
 

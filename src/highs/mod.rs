@@ -3,7 +3,7 @@ pub mod format;
 pub mod output;
 
 use anyhow::Result;
-use highs::{ColProblem, HighsModelStatus, Row, Sense};
+use highs::{ColProblem, HighsModelStatus, HighsSolutionStatus, Row, Sense};
 use indexmap::IndexMap;
 
 use crate::{
@@ -19,14 +19,16 @@ pub struct SolutionRow {
 }
 
 pub struct SolutionData {
+    pub status: HighsModelStatus,
     pub objective_name: String,
     pub objective_value: f64,
     pub constraints: Vec<SolutionRow>,
     pub variables: Vec<SolutionRow>,
 }
 
+/// Solve, with an empty solution (and NaN objective) if HiGHS didn't find a feasible one
 pub fn highs_solve(
-    compiled: Compiled,
+    compiled: &Compiled,
     config: &[(String, String)],
     verbose: bool,
 ) -> Result<SolutionData> {
@@ -35,20 +37,20 @@ pub fn highs_solve(
     let mut pb = ColProblem::new();
     let mut rows: IndexMap<ConId, Row> = IndexMap::new();
     let mut cols: Vec<VarId> = vec![];
-    let mut objective: Option<ConId> = None;
+    let mut objective: Option<&ConId> = None;
     let mut obj_offset: Option<f64> = None;
 
     for (con_id, row_type, rhs) in cons {
-        if row_type == RowType::Unconstrained {
+        if *row_type == RowType::Unconstrained {
             // The only way we tell which function is the objective is that it is unconstrained...
             // Seems like this should be a bit more robust
             objective = Some(con_id);
 
-            obj_offset = Some(rhs);
+            obj_offset = Some(*rhs);
         } else {
-            let range = row_type.to_range(rhs);
+            let range = row_type.to_range(*rhs);
             let row = pb.add_row(range);
-            rows.insert(con_id, row);
+            rows.insert(con_id.clone(), row);
         }
     }
 
@@ -67,14 +69,14 @@ pub fn highs_solve(
         let mut col_factor: f64 = 0.;
 
         for (con_id, val) in &con_map.coeffs {
-            if *con_id == objective {
+            if con_id == objective {
                 col_factor = *val;
             } else {
                 let row = rows.get(con_id).expect("no row at con_id");
                 row_factors.push((*row, *val));
             }
         }
-        cols.push(var_id);
+        cols.push(var_id.clone());
 
         match con_map.var_type {
             VarType::Float => {
@@ -101,15 +103,19 @@ pub fn highs_solve(
     apply_options(&mut model, config)?;
 
     let solved_model = model.solve();
-    anyhow::ensure!(
-        solved_model.status() == HighsModelStatus::Optimal,
-        "HiGHS did not find an optimal solution: {:?}",
-        solved_model.status()
-    );
+    let status = solved_model.status();
+    let objective_name = format_name(objective.0, &objective.1);
+    if solved_model.primal_solution_status() != HighsSolutionStatus::Feasible {
+        return Ok(SolutionData {
+            status,
+            objective_name,
+            objective_value: f64::NAN,
+            constraints: vec![],
+            variables: vec![],
+        });
+    }
     let objective_value = solved_model.objective_value();
     let solution = solved_model.get_solution();
-
-    let objective_name = format_name(objective.0, &objective.1);
 
     let constraints: Vec<SolutionRow> = rows
         .keys()
@@ -134,9 +140,36 @@ pub fn highs_solve(
         .collect();
 
     Ok(SolutionData {
+        status,
         objective_name,
         objective_value,
         constraints,
         variables,
     })
+}
+
+/// A snake_case name for a model status, eg `time_limit`
+pub fn status_name(status: HighsModelStatus) -> &'static str {
+    use HighsModelStatus::*;
+    match status {
+        NotSet => "not_set",
+        LoadError => "load_error",
+        ModelError => "model_error",
+        PresolveError => "presolve_error",
+        SolveError => "solve_error",
+        PostsolveError => "postsolve_error",
+        ModelEmpty => "model_empty",
+        Infeasible => "infeasible",
+        UnboundedOrInfeasible => "unbounded_or_infeasible",
+        Unbounded => "unbounded",
+        Optimal => "optimal",
+        ObjectiveBound => "objective_bound",
+        ObjectiveTarget => "objective_target",
+        ReachedTimeLimit => "time_limit",
+        ReachedIterationLimit => "iteration_limit",
+        ReachedSolutionLimit => "solution_limit",
+        ReachedInterrupt => "interrupted",
+        ReachedMemoryLimit => "memory_limit",
+        _ => "unknown",
+    }
 }
