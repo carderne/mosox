@@ -5,7 +5,7 @@ An LP matrix generator for [GMPL (MathProg)](https://en.wikibooks.org/wiki/GLPK/
 Can be used in several ways:
 - Compile an MPS file for solving elsewhere
 - Solve directly with the [HiGHS](https://highs.dev/) integration, no other binary needed
-- From Python to pass data directly from Pandas
+- From Python, with data from pandas (or a `.dat` file), and scenario sweeps
 
 It works for a subset of GMPL (specifically the subset required to run [Osemosys](https://osemosys.github.io/)).
 See [Known limitations](#known-limitations) section below.
@@ -25,6 +25,13 @@ cargo install mosox
 brew tap carderne/mosox-tap
 brew install mosox
 ```
+
+#### Python
+```bash
+pip install mosox  # or: uv add mosox
+```
+Requires Python >= 3.11. Wheels are built for Linux x86_64, macOS arm64 and Windows x64;
+elsewhere pip builds from source, which needs a Rust toolchain.
 
 #### Pre-built binaries (macOS, Windows, Linux)
 Binaries are built for a small set of systems and architectures.
@@ -81,46 +88,37 @@ mosox solve examples/basic/model.mod -o output.txt
 ```
 
 ### Python
-Data can be passed from Python instead of (or on top of) a `.dat` file:
-pandas DataFrames or Series, pyarrow Tables, or plain values.
+Pass data as pandas DataFrames, on top of any data in the model file or a `.dat` file.
+Index columns are matched by set name (as in [otoole](https://github.com/OSeMOSYS/otoole)), then `VALUE`.
 ```python
+import pandas as pd
 import mosox
 
 model = mosox.Model.from_file("examples/2d_params/model.mod")
-solution = model.solve({
-    "PLANTS": ["P1", "P2"],
-    "supply": {"P1": 100, "P2": 150},
-    "cost": df,  # PLANTS, WAREHOUSES, VALUE (matched by name, else read by position)
-    ...
-})
+cost = pd.DataFrame({"PLANTS": ["P1", "P2"], "WAREHOUSES": ["W1", "W1"], "VALUE": [9, 11]})
+
+# `update` patches rows; dicts and scalars work too
+solution = model.solve(mosox.Data().update({"cost": cost, "supply": {"P1": 120}}))
 solution.status, solution.objective
-solution["ship"]  # DataFrame with columns PLANTS, WAREHOUSES, VALUE, MARGINAL
+solution["ship"]  # DataFrame: PLANTS, WAREHOUSES, VALUE, MARGINAL
 ```
 
-A param table's index columns are matched by name if they're named for the domain's sets or dummies
-(`REGION` or `r` in `{r in REGION}`), and otherwise read by position: the index columns, then the value.
-A single value fills an indexed param.
-
-`Data` layers data, eg a `.dat` file (parsed once) or [otoole](https://github.com/OSeMOSYS/otoole) data,
-patched or replaced for each scenario:
+Base data can come from a `.dat` file (`Data.from_dat`) or otoole (`Data.from_otoole(*otoole.read(...))`).
+Run a sweep over every combination of factors, in parallel:
 ```python
-base = mosox.Data.from_dat("ose.dat")
-base = mosox.Data.from_otoole(*otoole.read("config.yaml", "csv", "data/"))
-model.solve(base.update({"CapitalCost": cheap_solar}, defaults={"EmissionsPenalty": 0}))
-```
-
-Scenarios run with progress events, in parallel, optionally writing each solution to a store:
-```python
+model = mosox.Model.from_file("examples/osemosys_small/osemosys.mod")
+base = mosox.Data.from_dat("examples/osemosys_small/ose_small.dat")
 scenarios = mosox.product(
-    carbon={"low": {"EmissionsPenalty": 10}, "high": {"EmissionsPenalty": 100}},
-    discount={r: {"DiscountRate": r} for r in [0.03, 0.05]},
+    carbon={"none": {}, "high": {"EmissionsPenalty": 100}},
+    discount={r: {"DiscountRate": r} for r in [0.05, 0.10]},
 )
 run = model.run(scenarios, base, workers=4, keep=["NewCapacity"], store="results/")
-for event in run:  # Started, Compiled, Finished, Failed, Skipped (also `async for`)
+for event in run:  # Started, Compiled, Finished, Failed, Skipped
     print(f"{event.done}/{event.total}", type(event).__name__, event.scenario.name)
-results = run.results()  # or mosox.Results.open("results/")
-results.summary          # a row per scenario: coords, status, objective, timings
-results["NewCapacity"]   # all scenarios, with scenario and coord columns first
+
+results = run.results()  # or later: mosox.Results.open("results/")
+results.summary          # a row per scenario: status, objective, timings
+results["NewCapacity"]   # all scenarios, with scenario, carbon and discount columns
 ```
 
 
