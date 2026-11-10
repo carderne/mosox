@@ -47,8 +47,7 @@ fn consume(entries: Pairs<'_, Rule>) -> Result<Vec<Entry>> {
             | Rule::DISPLAY
             | Rule::SOLVE
             | Rule::FOR
-            | Rule::TABLE
-            | Rule::COMMENT => {}
+            | Rule::TABLE => {}
             _ => {
                 let (line, _) = entry.line_col();
                 bail!(

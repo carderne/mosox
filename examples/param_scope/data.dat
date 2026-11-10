@@ -1,0 +1,20 @@
+set SEASON := 1 2;
+set HOUR := 01 02 03;
+set TIMESLICE := 101 102 103 201 202 203;
+param InSeason default 0 :
+      1 2 :=
+  101 1 0
+  102 1 0
+  103 1 0
+  201 0 1
+  202 0 1
+  203 0 1 ;
+param AtHour default 0 :
+      01 02 03 :=
+  101  1  0  0
+  102  0  1  0
+  103  0  0  1
+  201  1  0  0
+  202  0  1  0
+  203  0  0  1 ;
+end;

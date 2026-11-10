@@ -20,7 +20,10 @@ static PRATT_PARSER: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
     PrattParser::new()
         // Precedence lowest to highest (per GMPL spec)
         .op(Op::infix(Rule::add, Left) | Op::infix(Rule::sub, Left))
-        .op(Op::prefix(Rule::sum_prefix)) // iterated ops: between add/sub and mul/div
+        // iterated ops: between add/sub and mul/div
+        .op(Op::prefix(Rule::sum_prefix)
+            | Op::prefix(Rule::min_prefix)
+            | Op::prefix(Rule::max_prefix))
         .op(Op::infix(Rule::mul, Left) | Op::infix(Rule::div, Left))
         .op(Op::prefix(Rule::neg))
         .op(Op::infix(Rule::pow, Right))
@@ -1070,6 +1073,7 @@ pub enum Expr {
     Str(Spur),
     VarSubscripted(VarSubscripted),
     FuncSum(Box<FuncSum>),
+    FuncIterMinMax(Box<FuncIterMinMax>),
     FuncMin(Box<FuncMin>),
     FuncMax(Box<FuncMax>),
     FuncCard(Box<FuncCard>),
@@ -1119,6 +1123,20 @@ pub fn parse_expr(pairs: Pairs<Rule>) -> Result<Expr> {
                     Ok(Expr::FuncSum(Box::new(FuncSum {
                         domain,
                         operand: Box::new(rhs),
+                    })))
+                }
+                Rule::min_prefix | Rule::max_prefix => {
+                    let is_min = op.as_rule() == Rule::min_prefix;
+                    let domain = op
+                        .into_inner()
+                        .find(|p| p.as_rule() == Rule::domain)
+                        .map(Domain::from_entry)
+                        .transpose()?
+                        .context("min/max prefix must have domain")?;
+                    Ok(Expr::FuncIterMinMax(Box::new(FuncIterMinMax {
+                        domain,
+                        operand: Box::new(rhs),
+                        is_min,
                     })))
                 }
                 rule => bail!("Expected prefix op, found {:?}", rule),
@@ -1862,6 +1880,14 @@ impl SubscriptShift {
 pub struct FuncSum {
     pub domain: Domain,
     pub operand: Box<Expr>,
+}
+
+/// Iterated min/max over a domain (`min{i in I} expr`); the operand must be numeric
+#[derive(Clone, Debug)]
+pub struct FuncIterMinMax {
+    pub domain: Domain,
+    pub operand: Box<Expr>,
+    pub is_min: bool,
 }
 
 /// Min function
