@@ -49,10 +49,31 @@ fn idx_extend(map: &mut IdxValMap, other: &IdxValMap) {
     }
 }
 
+/// Bind a param's own domain dummies to the concrete index it is being read at.
+///
+/// A computed param (`param P{i in I} := <expr in i>`) or an expression default
+/// (`default <expr in i>`) must be evaluated with `i` bound to the subscript the
+/// param is read at, not with whatever `i` happens to mean at the call site.
+/// Reading `P[j]` inside `{i in I, j in I: P[j] = P[i]}` would otherwise evaluate
+/// both sides with the caller's `i`, so the condition is always true.
+/// GMPL only lets the expression refer to the param's own dummies and to global
+/// names, so the caller's bindings are not carried over.
+fn param_scope(param: &Param, index: &Index) -> IdxValMap {
+    let mut scope = IdxValMap::new();
+    if let Some(domain) = &param.decl.domain {
+        for (name, val) in domain.index_names().iter().zip(index.iter()) {
+            if let Some(dummy) = name.dummy {
+                scope.push((dummy, val.clone()));
+            }
+        }
+    }
+    scope
+}
+
 pub fn resolve_param(
     param: &Param,
     index: &Index,
-    idx_val_map: &IdxValMap,
+    _idx_val_map: &IdxValMap,
     lookups: &Lookups,
 ) -> Result<Vec<Term>> {
     match &param.data {
@@ -61,14 +82,14 @@ pub fn resolve_param(
                 Ok(vec![arr_val.into()])
             } else {
                 match &param.default {
-                    Some(expr) => recurse(expr, lookups, idx_val_map),
+                    Some(expr) => recurse(expr, lookups, &param_scope(param, index)),
                     None => bail!("tried to get uninitialized param"),
                 }
             }
         }
-        ParamValEnum::Expr(expr) => recurse(expr, lookups, idx_val_map),
+        ParamValEnum::Expr(expr) => recurse(expr, lookups, &param_scope(param, index)),
         ParamValEnum::None => match &param.default {
-            Some(expr) => recurse(expr, lookups, idx_val_map),
+            Some(expr) => recurse(expr, lookups, &param_scope(param, index)),
             None => bail!("tried to get uninitialized param"),
         },
     }
@@ -123,6 +144,25 @@ pub fn recurse(expr: &Expr, lookups: &Lookups, idx_val_map: &IdxValMap) -> Resul
             }
         }
         Expr::FuncSum(func) => expand_sum(&func.operand, &func.domain, lookups, idx_val_map),
+        Expr::FuncIterMinMax(func) => {
+            let which = if func.is_min { "min" } else { "max" };
+            let mut acc: Option<f64> = None;
+            for idx in domain_to_indexes(&func.domain, lookups, idx_val_map)? {
+                let mut idx_map = get_index_map(&func.domain.parts, &idx)?;
+                idx_extend(&mut idx_map, idx_val_map);
+                let terms = recurse(&func.operand, lookups, &idx_map)?;
+                let val = resolve_terms_to_num(&terms)?
+                    .with_context(|| format!("iterated {which} needs a numeric operand"))?;
+                acc = Some(match acc {
+                    None => val,
+                    Some(a) if func.is_min => a.min(val),
+                    Some(a) => a.max(val),
+                });
+            }
+            Ok(vec![Term::Num(acc.with_context(|| {
+                format!("iterated {which} over an empty domain")
+            })?)])
+        }
         Expr::FuncMin(func) => {
             let val = eval_func_minmax(&func.domain, true, lookups, idx_val_map)?;
             Ok(vec![Term::Num(val)])

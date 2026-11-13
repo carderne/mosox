@@ -227,9 +227,13 @@ subscript_shift =  { (add | sub) ~ int }
 // Precedence (lowest to highest): conditional, add/sub, sum/prod, mul/div, neg, pow
 // Example: Rate[r] * Ratio[r]
 expr            =  { prefix* ~ primary ~ (infix ~ prefix* ~ primary)* }
-prefix          = _{ neg | sum_prefix }
+prefix          = _{ neg | sum_prefix | min_prefix | max_prefix }
 neg             =  { "-" }
 sum_prefix      =  { "sum" ~ domain }
+// Iterated min/max (GMPL: `min{d} expr`, same precedence as sum).
+// The older `min{d} min(var)` form is left to func_min/func_max below.
+min_prefix      =  { "min" ~ domain ~ !("min" ~ "(") }
+max_prefix      =  { "max" ~ domain ~ !("max" ~ "(") }
 infix           = _{ add | sub | mul | div | pow }
 add             =  { "+" }
 sub             =  { "-" }
@@ -290,6 +294,8 @@ double_char    = _{ "\"\"" | (!"\"" ~ ANY) }
 
 // Comments and whitespace are automatically inserted between all rules
 WHITESPACE       = _{ " " | "\t" | NEWLINE }
-COMMENT          = @{ comment_multi | comment_single }
-comment_single   = @{ "#" ~ (!NEWLINE ~ ANY)* }
-comment_multi    =  { "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+// Silent, so a comment inside an expression is skipped like whitespace
+// instead of reaching the Pratt parser as a token.
+COMMENT          = _{ comment_multi | comment_single }
+comment_single   = _{ "#" ~ (!NEWLINE ~ ANY)* }
+comment_multi    = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
